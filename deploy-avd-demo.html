@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Fresh Desktop — One-Click AVD</title>
+<style>
+  :root {
+    --bg: #000000;
+    --card: #161616;
+    --accent: #009246;      /* Italian green */
+    --accent2: #CD212A;     /* Italian red */
+    --italy-white: #F4F5F0;
+    --warn: #CD212A;
+    --text: #f0f0f0;
+    --muted: #9a9a9a;
+    --border: #2e2e2e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    padding: 48px 20px;
+  }
+  .wrap { max-width: 760px; width: 100%; }
+  h1 { font-size: 28px; margin-bottom: 4px; }
+  .sub { color: var(--muted); margin-bottom: 32px; font-size: 15px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 24px 28px;
+    margin-bottom: 20px;
+  }
+  .card h2 {
+    font-size: 15px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin: 0 0 14px 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .step-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: white;
+    font-size: 12px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  p { line-height: 1.55; color: var(--text); }
+  code {
+    background: #141414;
+    border: 1px solid var(--border);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 13px;
+  }
+  input[type=text], input[type=password] {
+    width: 100%;
+    padding: 12px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: #141414;
+    color: var(--text);
+    font-size: 14px;
+    margin-top: 8px;
+  }
+  button {
+    border: none;
+    border-radius: 10px;
+    padding: 14px 22px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: 14px;
+  }
+  .btn-primary { background: var(--accent); color: white; }
+  .btn-primary:disabled { background: #2a2a2a; color: var(--muted); cursor: not-allowed; }
+  .btn-ghost {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 14px;
+    font-size: 13px;
+    margin-top: 0;
+  }
+  .btn-deploy {
+    background: var(--accent2);
+    color: white;
+    display: none;
+    text-decoration: none;
+    text-align: center;
+  }
+  .btn-deploy.show { display: inline-block; }
+  a.btn-deploy { padding: 14px 22px; border-radius: 10px; font-weight: 700; }
+  .muted { color: var(--muted); font-size: 13px; }
+  ol { padding-left: 20px; color: var(--text); }
+  ol li { margin-bottom: 6px; }
+  .pill {
+    display: inline-block;
+    background: #1c1c1c;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    margin-bottom: 16px;
+  }
+  .tricolor-bar {
+    display: flex;
+    width: 100%;
+    max-width: 220px;
+    height: 6px;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 18px;
+  }
+  .tricolor-bar span { flex: 1; }
+  .tricolor-bar .g { background: var(--accent); }
+  .tricolor-bar .w { background: var(--italy-white); }
+  .tricolor-bar .r { background: var(--accent2); }
+  .brand {
+    font-size: 34px;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    margin-bottom: 2px;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+  .brand .tag {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+    background: rgba(0,146,70,0.12);
+    border: 1px solid rgba(0,146,70,0.4);
+    padding: 3px 9px;
+    border-radius: 20px;
+    letter-spacing: 0.03em;
+  }
+  .status-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+  }
+  .status-text { font-size: 13px; }
+
+  /* --- Pizza tracker --- */
+  .tracker-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 6px;
+  }
+  .speed-toggle {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    margin-left: auto;
+  }
+  .speed-toggle button {
+    margin: 0;
+    padding: 6px 12px;
+    font-size: 12px;
+    background: #141414;
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+  .speed-toggle button.active {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+  }
+  .stage-track {
+    display: flex;
+    justify-content: space-between;
+    position: relative;
+    margin: 28px 0 10px 0;
+  }
+  .stage-track::before {
+    content: "";
+    position: absolute;
+    top: 22px;
+    left: 22px;
+    right: 22px;
+    height: 4px;
+    background: #2a2a2a;
+    border-radius: 4px;
+    z-index: 0;
+  }
+  .stage-fill {
+    position: absolute;
+    top: 22px;
+    left: 22px;
+    height: 4px;
+    width: 0%;
+    background: linear-gradient(90deg, var(--accent2) 0%, var(--italy-white) 50%, var(--accent) 100%);
+    border-radius: 4px;
+    z-index: 1;
+    transition: width 0.3s linear;
+  }
+  .stage-node {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 60px;
+    cursor: pointer;
+    background: none;
+    border: none;
+    color: var(--muted);
+    padding: 0;
+  }
+  .stage-emoji {
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    background: #141414;
+    border: 2px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    transition: all 0.25s ease;
+  }
+  .stage-node.done .stage-emoji {
+    border-color: var(--accent2);
+    background: #0f2a1b;
+  }
+  .stage-node.active .stage-emoji {
+    border-color: var(--warn);
+    background: #2a230f;
+    transform: scale(1.15);
+    box-shadow: 0 0 0 4px rgba(205,33,42,0.18);
+  }
+  .stage-label {
+    font-size: 10px;
+    text-align: center;
+    margin-top: 6px;
+    color: var(--muted);
+    line-height: 1.2;
+  }
+  .stage-node.active .stage-label, .stage-node.done .stage-label { color: var(--text); }
+  .now-playing {
+    background: #141414;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-top: 18px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+  }
+  .now-playing .title { font-weight: 700; }
+  .now-playing .blurb { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .elapsed {
+    font-variant-numeric: tabular-nums;
+    color: var(--warn);
+    font-weight: 700;
+    font-size: 15px;
+    white-space: nowrap;
+  }
+  .delivered-banner {
+    display: none;
+    margin-top: 16px;
+    background: #0f2a1b;
+    border: 1px solid var(--accent);
+    border-radius: 10px;
+    padding: 16px;
+    text-align: center;
+  }
+  .delivered-banner.show { display: block; }
+  .est-note { font-size: 11px; color: var(--muted); margin-top: 10px; }
+
+  /* --- Presentation countdown --- */
+  .preso-timer {
+    position: fixed;
+    top: 18px;
+    right: 18px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px 16px 8px 16px;
+    text-align: center;
+    z-index: 100;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.6);
+    min-width: 132px;
+  }
+  .preso-timer-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin-bottom: 2px;
+  }
+  .preso-timer-value {
+    font-size: 28px;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    color: var(--accent);
+    line-height: 1.1;
+  }
+  .preso-timer.warn .preso-timer-value { color: #e8b400; }
+  .preso-timer.critical .preso-timer-value { color: var(--accent2); animation: presoPulse 1s infinite; }
+  @keyframes presoPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+  .preso-timer-controls {
+    display: flex;
+    gap: 6px;
+    justify-content: center;
+    margin-top: 6px;
+  }
+  .preso-timer-controls button {
+    margin: 0;
+    padding: 4px 10px;
+    font-size: 11px;
+  }
+  @media (max-width: 640px) {
+    .preso-timer {
+      position: static;
+      margin-bottom: 16px;
+      min-width: 0;
+    }
+  }
+</style>
+</head>
+<body>
+<div class="preso-timer" id="presoTimer">
+  <div class="preso-timer-label">⏱ Presentation Clock</div>
+  <div class="preso-timer-value" id="presoTimerValue">30:00</div>
+  <div class="preso-timer-controls">
+    <button class="btn-ghost" onclick="startPresoTimer()">Start</button>
+    <button class="btn-ghost" onclick="resetPresoTimer()">Reset</button>
+  </div>
+</div>
+<div class="wrap">
+  <div class="tricolor-bar"><span class="g"></span><span class="w"></span><span class="r"></span></div>
+  <div class="pill">Internal demo &middot; deploys into your own live Azure subscription</div>
+  <div class="brand">🍕 Fresh Desktop <span class="tag">🇮🇹 made fresh to order</span></div>
+  <p class="sub">One click deploys a native Azure Virtual Desktop environment&mdash;host pool, workspace, desktop app group, and one Microsoft&nbsp;Entra&#8209;joined Windows&nbsp;11 session host&mdash;and grants <em>you</em> access automatically. No domain controller, no manual RBAC. Order it, watch it bake, log in fresh.</p>
+
+  <div class="card">
+    <h2><span class="step-num">1</span> Build your order &amp; deploy</h2>
+    <p>One click opens the Azure Portal's own deployment page&mdash;pre-loaded straight from the template's permanent home on GitHub, with real dropdowns for <strong>Pizza Size</strong> (VM size), <strong>Crust</strong> (Windows 11 image), and <strong>Toppings</strong> (session capacity + clipboard/drive redirection). Defaults are already picked, so Review + Create works with zero clicks&mdash;or change them live for the crowd.</p>
+    <button class="btn-primary" id="deployMainBtn" onclick="deployToAzure()">🚀 Deploy to Azure</button>
+    <p class="status-text" id="publishStatus" style="margin-top:10px;"></p>
+  </div>
+
+  <div class="card">
+    <h2><span class="step-num">2</span> Track your order</h2>
+    <p class="muted">Hit start the moment you click <strong>Create</strong> in the portal tab.</p>
+    <div class="tracker-controls">
+      <button class="btn-primary" id="startBtn" onclick="startTracker()" style="margin-top:0;">▶ Start tracking my order</button>
+      <button class="btn-ghost" onclick="resetTracker()">Reset</button>
+      <div class="speed-toggle">
+        <span class="muted">Speed:</span>
+        <button id="speed1" class="active" onclick="setSpeed(1)">1x (live)</button>
+        <button id="speed8" onclick="setSpeed(8)">8x (rehearse)</button>
+      </div>
+    </div>
+
+    <div class="stage-track" id="stageTrack">
+      <div class="stage-fill" id="stageFill"></div>
+      <!-- stage nodes injected by JS -->
+    </div>
+
+    <div class="now-playing">
+      <div>
+        <div class="title" id="stageTitle">🧾 Order Placed</div>
+        <div class="blurb" id="stageBlurb">Click Start once you've hit Create in the portal.</div>
+      </div>
+      <div class="elapsed" id="elapsedTime">0:00</div>
+    </div>
+    <p class="est-note">Synced to typical deploy timing (~18 min). Click any stage icon anytime to jump the tracker there if the real deployment runs ahead or behind &mdash; you're always in control on stage.</p>
+
+    <div class="delivered-banner" id="deliveredBanner">
+      <div style="font-size:28px;">🍕 Fresh Out of the Oven!</div>
+      <p style="margin:6px 0 0 0;">Your Fresh Desktop is hot and ready. Go log in below.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="step-num">3</span> Log in to your Fresh Desktop</h2>
+    <p>Sign in with the same Microsoft&nbsp;Entra account you deployed with&mdash;your desktop is already assigned, no extra setup.</p>
+    <a class="btn-deploy show" style="background:var(--accent); color:white;" href="https://client.wvd.microsoft.com/arm/webclient/" target="_blank">🖥️ Open AVD Web Client &rarr;</a>
+  </div>
+
+  <div class="card">
+    <h2><span class="step-num">4</span> Clean up when you're done</h2>
+    <p>This spins up a real VM that bills by the hour. Unlike GitHub's API, Azure's own sign-in and management endpoints don't allow a webpage to call them directly from the browser (no CORS) &mdash; so this can't be a single silent click the way Deploy is. This is the fastest real alternative: type the resource group name you used in the portal, click once, and both the command is on your clipboard <em>and</em> Cloud Shell is open ready to paste it into.</p>
+    <input type="text" id="cleanupRgName" placeholder="Resource group name (whatever you typed in the portal's Basics tab)">
+    <div class="status-row">
+      <button class="btn-primary" style="margin-top:14px; background: var(--accent2);" onclick="copyCleanupCommand()">📋 Copy Command &amp; Open Cloud Shell</button>
+    </div>
+    <p class="status-text" id="cleanupStatus" style="margin-top:10px;"></p>
+    <p class="muted" style="margin-top:14px;">Cloud Shell will open in a new tab &mdash; just paste (Ctrl/Cmd+V) and hit enter; it may ask you to sign in and pick a subscription/storage the first time. Prefer clicking through instead? <a href="https://portal.azure.com/#view/HubsExtension/BrowseResourceGroups.ReactView" target="_blank" style="color:#7fffa0;">Open Resource Groups in the Portal</a> and delete it from there.</p>
+  </div>
+</div>
+
+<script>
+// The template is hosted permanently at a fixed public GitHub repo — no publishing step needed.
+// Confirm this is still the repo's actual default branch before the demo (checked "main" at build time;
+// re-verify with `git remote show origin` or the repo's GitHub page if this was ever repointed).
+const RAW_TEMPLATE_URL = 'https://raw.githubusercontent.com/nickprignano/fresh-desktop-demo/main/azuredeploy.json';
+
+function deployToAzure() {
+  const statusEl = document.getElementById('publishStatus');
+  const deployUrl = 'https://portal.azure.com/#create/Microsoft.Template/uri/' + encodeURIComponent(RAW_TEMPLATE_URL);
+
+  statusEl.innerHTML = '✅ Opening the Azure Portal… <a href="' + deployUrl + '" target="_blank" style="color:#7fffa0;">click here</a> if the new tab did not open.';
+  statusEl.style.color = '#7fffa0';
+  window.open(deployUrl, '_blank');
+  startPresoTimer();
+}
+
+// ---- Presentation countdown (30 min, auto-starts on deploy) ----
+const PRESO_TOTAL_MS = 30 * 60 * 1000;
+let presoRemainingMs = PRESO_TOTAL_MS;
+let presoTimerInterval = null;
+let presoLastTick = null;
+
+function formatMMSS(ms) {
+  const totalSec = Math.max(0, Math.ceil(ms / 1000));
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return m + ':' + String(s).padStart(2, '0');
+}
+
+function renderPresoTimer() {
+  document.getElementById('presoTimerValue').textContent = formatMMSS(presoRemainingMs);
+  const wrap = document.getElementById('presoTimer');
+  wrap.classList.toggle('warn', presoRemainingMs <= 15 * 60000 && presoRemainingMs > 5 * 60000);
+  wrap.classList.toggle('critical', presoRemainingMs <= 5 * 60000);
+}
+
+function presoTick() {
+  const now = Date.now();
+  const delta = now - presoLastTick;
+  presoLastTick = now;
+  presoRemainingMs = Math.max(0, presoRemainingMs - delta);
+  renderPresoTimer();
+  if (presoRemainingMs <= 0 && presoTimerInterval) {
+    clearInterval(presoTimerInterval);
+    presoTimerInterval = null;
+  }
+}
+
+function startPresoTimer() {
+  if (presoTimerInterval) return; // already running, don't restart on a second deploy click
+  presoLastTick = Date.now();
+  presoTimerInterval = setInterval(presoTick, 250);
+}
+
+function resetPresoTimer() {
+  if (presoTimerInterval) { clearInterval(presoTimerInterval); presoTimerInterval = null; }
+  presoRemainingMs = PRESO_TOTAL_MS;
+  renderPresoTimer();
+}
+
+renderPresoTimer();
+
+// ---- Cleanup ----
+function copyCleanupCommand() {
+  const rgInput = document.getElementById('cleanupRgName').value.trim();
+  const statusEl = document.getElementById('cleanupStatus');
+  if (!rgInput) {
+    statusEl.textContent = '⚠ Type the resource group name first.';
+    statusEl.style.color = '#f87171';
+    return;
+  }
+  const cmd = 'az group delete --name ' + rgInput + ' --yes --no-wait';
+
+  // Open Cloud Shell synchronously, in direct response to the click, so popup blockers don't eat it.
+  window.open('https://shell.azure.com', '_blank');
+
+  const ta = document.createElement('textarea');
+  ta.value = cmd;
+  ta.style.position = 'fixed';
+  ta.style.left = '-9999px';
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  let copied = false;
+  try { copied = document.execCommand('copy'); } catch (e) { copied = false; }
+  document.body.removeChild(ta);
+
+  if (copied) {
+    statusEl.textContent = '✅ Copied & Cloud Shell opened. Paste (Ctrl/Cmd+V) and hit enter: ' + cmd;
+    statusEl.style.color = '#7fffa0';
+  } else if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(cmd).then(() => {
+      statusEl.textContent = '✅ Copied & Cloud Shell opened. Paste (Ctrl/Cmd+V) and hit enter: ' + cmd;
+      statusEl.style.color = '#7fffa0';
+    }).catch(() => {
+      statusEl.textContent = 'Cloud Shell opened, but could not auto-copy — paste this manually: ' + cmd;
+      statusEl.style.color = '#f87171';
+    });
+  } else {
+    statusEl.textContent = 'Cloud Shell opened, but could not auto-copy — paste this manually: ' + cmd;
+    statusEl.style.color = '#f87171';
+  }
+}
+
+// ---- Pizza tracker ----
+const STAGES = [
+  { emoji: '🧾', title: 'Order Placed', blurb: 'Resource group, network, host pool, workspace & app group going in.', durationMs: 2 * 60000 },
+  { emoji: '🧑‍🍳', title: 'Prepping Your Pie', blurb: 'Session host VM is being built.', durationMs: 4 * 60000 },
+  { emoji: '🔥', title: 'In the Oven', blurb: 'Joining Microsoft Entra ID — no domain controller in sight.', durationMs: 6 * 60000 },
+  { emoji: '🛵', title: 'Out for Delivery', blurb: 'AVD agent is registering your session host with the host pool.', durationMs: 6 * 60000 },
+  { emoji: '🍕', title: 'Fresh Out of the Oven', blurb: "Your Fresh Desktop is hot and ready. Go log in.", durationMs: 0 }
+];
+const cumulative = [];
+STAGES.reduce((acc, s, i) => { cumulative[i] = acc; return acc + s.durationMs; }, 0);
+const TOTAL_MS = STAGES.reduce((a, s) => a + s.durationMs, 0);
+
+let elapsedMs = 0;
+let speed = 1;
+let timer = null;
+let lastTick = null;
+
+const track = document.getElementById('stageTrack');
+STAGES.forEach((s, i) => {
+  const node = document.createElement('button');
+  node.className = 'stage-node';
+  node.id = 'node-' + i;
+  node.onclick = () => jumpToStage(i);
+  node.innerHTML = '<div class="stage-emoji">' + s.emoji + '</div><div class="stage-label">' + s.title + '</div>';
+  track.appendChild(node);
+});
+
+function setSpeed(x) {
+  speed = x;
+  document.getElementById('speed1').classList.toggle('active', x === 1);
+  document.getElementById('speed8').classList.toggle('active', x === 8);
+}
+
+function currentStageIndex() {
+  for (let i = STAGES.length - 1; i >= 0; i--) {
+    if (elapsedMs >= cumulative[i]) return i;
+  }
+  return 0;
+}
+
+function render() {
+  const idx = currentStageIndex();
+  const pct = Math.min(100, (elapsedMs / TOTAL_MS) * 100);
+  document.getElementById('stageFill').style.width = pct + '%';
+
+  STAGES.forEach((s, i) => {
+    const node = document.getElementById('node-' + i);
+    node.classList.toggle('done', i < idx || (i === STAGES.length - 1 && elapsedMs >= TOTAL_MS));
+    node.classList.toggle('active', i === idx && elapsedMs < TOTAL_MS);
+  });
+
+  const stage = STAGES[idx];
+  document.getElementById('stageTitle').textContent = stage.emoji + ' ' + stage.title;
+  document.getElementById('stageBlurb').textContent = stage.blurb;
+
+  const totalSec = Math.floor(elapsedMs / 1000);
+  const m = Math.floor(totalSec / 60);
+  const sSec = totalSec % 60;
+  document.getElementById('elapsedTime').textContent = m + ':' + String(sSec).padStart(2, '0');
+
+  const delivered = elapsedMs >= TOTAL_MS;
+  document.getElementById('deliveredBanner').classList.toggle('show', delivered);
+  if (delivered && timer) { clearInterval(timer); timer = null; }
+}
+
+function tick() {
+  const now = Date.now();
+  const delta = (now - lastTick) * speed;
+  lastTick = now;
+  elapsedMs = Math.min(TOTAL_MS, elapsedMs + delta);
+  render();
+}
+
+function startTracker() {
+  if (timer) return;
+  lastTick = Date.now();
+  timer = setInterval(tick, 200);
+  document.getElementById('startBtn').textContent = '⏸ Tracking…';
+}
+
+function resetTracker() {
+  if (timer) { clearInterval(timer); timer = null; }
+  elapsedMs = 0;
+  document.getElementById('startBtn').textContent = '▶ Start tracking my order';
+  render();
+}
+
+function jumpToStage(i) {
+  elapsedMs = cumulative[i];
+  render();
+}
+
+render();
+</script>
+</body>
+</html>

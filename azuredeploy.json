@@ -1,0 +1,367 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "description": "One-click demo: deploys a minimal native Azure Virtual Desktop environment (host pool, workspace, desktop application group, one Microsoft Entra-joined session host) and grants the person who deploys it access to log in immediately via the AVD web client. Demo/POC only — not hardened for production."
+  },
+  "parameters": {
+    "namePrefix": {
+      "type": "string",
+      "defaultValue": "avddemo",
+      "minLength": 3,
+      "maxLength": 10,
+      "metadata": {
+        "description": "Short prefix used to name all resources (lowercase letters/numbers only, e.g. avddemo)."
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Azure region to deploy into. Defaults to the resource group's region."
+      }
+    },
+    "pizzaSize": {
+      "type": "string",
+      "defaultValue": "🍕 Personal Pan (2 vCPU / 8 GB)",
+      "allowedValues": [
+        "🍕 Personal Pan (2 vCPU / 8 GB)",
+        "🍕🍕 Family Size (4 vCPU / 16 GB)",
+        "🍕🍕🍕 Large Party (8 vCPU / 32 GB)"
+      ],
+      "metadata": {
+        "description": "Session host VM size. Personal Pan is plenty for a demo."
+      }
+    },
+    "pizzaCrust": {
+      "type": "string",
+      "defaultValue": "Classic Crust (Windows 11, no apps)",
+      "allowedValues": [
+        "Classic Crust (Windows 11, no apps)",
+        "Stuffed Crust (Windows 11 + Microsoft 365 Apps)"
+      ],
+      "metadata": {
+        "description": "Desktop OS image. Stuffed Crust takes a little longer to boot the first time (M365 Apps preinstalled)."
+      }
+    },
+    "toppingExtraCheese": {
+      "type": "string",
+      "defaultValue": "Yes, extra cheese (higher session capacity)",
+      "allowedValues": [
+        "Yes, extra cheese (higher session capacity)",
+        "No thanks (default capacity)"
+      ],
+      "metadata": {
+        "description": "Raises the host pool's max concurrent session limit. Cosmetic for a 1-VM demo, but real."
+      }
+    },
+    "toppingPepperoni": {
+      "type": "string",
+      "defaultValue": "Yes, pepperoni (clipboard + drive redirection on)",
+      "allowedValues": [
+        "Yes, pepperoni (clipboard + drive redirection on)",
+        "No thanks (locked down session)"
+      ],
+      "metadata": {
+        "description": "Toggles a real RDP property: local clipboard and drive redirection into the session."
+      }
+    },
+    "adminUsername": {
+      "type": "string",
+      "defaultValue": "avddemoadmin",
+      "metadata": {
+        "description": "Local administrator username for the session host (not used for AVD sign-in, which uses Microsoft Entra ID)."
+      }
+    },
+    "adminPassword": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Local administrator password for the session host. Must meet Azure complexity requirements (12+ chars, 3 of: upper/lower/number/symbol)."
+      }
+    },
+    "utcValue": {
+      "type": "string",
+      "defaultValue": "[utcNow()]"
+    }
+  },
+  "variables": {
+    "hostPoolName": "[concat(parameters('namePrefix'), '-hp')]",
+    "appGroupName": "[concat(parameters('namePrefix'), '-dag')]",
+    "workspaceName": "[concat(parameters('namePrefix'), '-ws')]",
+    "vnetName": "[concat(parameters('namePrefix'), '-vnet')]",
+    "subnetName": "default",
+    "nicName": "[concat(parameters('namePrefix'), '-nic')]",
+    "vmName": "[concat(parameters('namePrefix'), '-vm')]",
+    "addressPrefix": "10.20.0.0/24",
+    "subnetPrefix": "10.20.0.0/24",
+    "registrationTokenExpiration": "[dateTimeAdd(parameters('utcValue'), 'PT4H')]",
+    "desktopVirtualizationUserRoleId": "1d18fff3-a72a-46b5-b4a9-0b38a3cd7e63",
+    "vmUserLoginRoleId": "fb879df8-f326-4884-b1cf-06f3ad86be52",
+    "vmSizeMap": {
+      "🍕 Personal Pan (2 vCPU / 8 GB)": "Standard_D2as_v5",
+      "🍕🍕 Family Size (4 vCPU / 16 GB)": "Standard_D4as_v5",
+      "🍕🍕🍕 Large Party (8 vCPU / 32 GB)": "Standard_D8as_v5"
+    },
+    "imageSkuMap": {
+      "Classic Crust (Windows 11, no apps)": "win11-24h2-avd",
+      "Stuffed Crust (Windows 11 + Microsoft 365 Apps)": "win11-24h2-avd-m365"
+    },
+    "sessionLimitMap": {
+      "Yes, extra cheese (higher session capacity)": 10,
+      "No thanks (default capacity)": 5
+    },
+    "rdpPropertyMap": {
+      "Yes, pepperoni (clipboard + drive redirection on)": "drivestoredirect:s:*;redirectclipboard:i:1;",
+      "No thanks (locked down session)": ""
+    },
+    "vmSize": "[variables('vmSizeMap')[parameters('pizzaSize')]]",
+    "imageSku": "[variables('imageSkuMap')[parameters('pizzaCrust')]]",
+    "maxSessionLimit": "[variables('sessionLimitMap')[parameters('toppingExtraCheese')]]",
+    "customRdpProperty": "[variables('rdpPropertyMap')[parameters('toppingPepperoni')]]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Network/virtualNetworks",
+      "apiVersion": "2023-09-01",
+      "name": "[variables('vnetName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "addressSpace": {
+          "addressPrefixes": [
+            "[variables('addressPrefix')]"
+          ]
+        },
+        "subnets": [
+          {
+            "name": "[variables('subnetName')]",
+            "properties": {
+              "addressPrefix": "[variables('subnetPrefix')]"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Network/networkInterfaces",
+      "apiVersion": "2023-09-01",
+      "name": "[variables('nicName')]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+      ],
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "ipconfig1",
+            "properties": {
+              "privateIPAllocationMethod": "Dynamic",
+              "subnet": {
+                "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), variables('subnetName'))]"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.DesktopVirtualization/hostPools",
+      "apiVersion": "2024-04-03",
+      "name": "[variables('hostPoolName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "hostPoolType": "Pooled",
+        "loadBalancerType": "BreadthFirst",
+        "preferredAppGroupType": "Desktop",
+        "maxSessionLimit": "[variables('maxSessionLimit')]",
+        "customRdpProperty": "[variables('customRdpProperty')]",
+        "startVMOnConnect": true,
+        "validationEnvironment": false,
+        "registrationInfo": {
+          "expirationTime": "[variables('registrationTokenExpiration')]",
+          "registrationTokenOperation": "Update"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.DesktopVirtualization/applicationGroups",
+      "apiVersion": "2024-04-03",
+      "name": "[variables('appGroupName')]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.DesktopVirtualization/hostPools', variables('hostPoolName'))]"
+      ],
+      "properties": {
+        "applicationGroupType": "Desktop",
+        "hostPoolArmPath": "[resourceId('Microsoft.DesktopVirtualization/hostPools', variables('hostPoolName'))]"
+      }
+    },
+    {
+      "type": "Microsoft.DesktopVirtualization/workspaces",
+      "apiVersion": "2024-04-03",
+      "name": "[variables('workspaceName')]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.DesktopVirtualization/applicationGroups', variables('appGroupName'))]"
+      ],
+      "properties": {
+        "friendlyName": "AVD Demo Workspace",
+        "applicationGroupReferences": [
+          "[resourceId('Microsoft.DesktopVirtualization/applicationGroups', variables('appGroupName'))]"
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Compute/virtualMachines",
+      "apiVersion": "2023-09-01",
+      "name": "[variables('vmName')]",
+      "location": "[parameters('location')]",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/networkInterfaces', variables('nicName'))]"
+      ],
+      "properties": {
+        "hardwareProfile": {
+          "vmSize": "[variables('vmSize')]"
+        },
+        "osProfile": {
+          "computerName": "[variables('vmName')]",
+          "adminUsername": "[parameters('adminUsername')]",
+          "adminPassword": "[parameters('adminPassword')]"
+        },
+        "storageProfile": {
+          "imageReference": {
+            "publisher": "MicrosoftWindowsDesktop",
+            "offer": "windows-11",
+            "sku": "[variables('imageSku')]",
+            "version": "latest"
+          },
+          "osDisk": {
+            "createOption": "FromImage",
+            "managedDisk": {
+              "storageAccountType": "StandardSSD_LRS"
+            }
+          }
+        },
+        "networkProfile": {
+          "networkInterfaces": [
+            {
+              "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('nicName'))]"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Compute/virtualMachines/extensions",
+      "apiVersion": "2023-09-01",
+      "name": "[concat(variables('vmName'), '/AADLoginForWindows')]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Compute/virtualMachines', variables('vmName'))]"
+      ],
+      "properties": {
+        "publisher": "Microsoft.Azure.ActiveDirectory",
+        "type": "AADLoginForWindows",
+        "typeHandlerVersion": "2.0",
+        "autoUpgradeMinorVersion": true
+      }
+    },
+    {
+      "type": "Microsoft.Compute/virtualMachines/extensions",
+      "apiVersion": "2023-09-01",
+      "name": "[concat(variables('vmName'), '/AVDAgentDSC')]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Compute/virtualMachines/extensions', variables('vmName'), 'AADLoginForWindows')]",
+        "[resourceId('Microsoft.DesktopVirtualization/hostPools', variables('hostPoolName'))]"
+      ],
+      "properties": {
+        "publisher": "Microsoft.Powershell",
+        "type": "DSC",
+        "typeHandlerVersion": "2.83",
+        "autoUpgradeMinorVersion": true,
+        "settings": {
+          "modulesUrl": "https://wvdportalstorageblob.blob.core.windows.net/galleryartifacts/Configuration.zip",
+          "configurationFunction": "Configuration.ps1\\AddSessionHost",
+          "properties": {
+            "hostPoolName": "[variables('hostPoolName')]",
+            "aadJoin": true
+          }
+        },
+        "protectedSettings": {
+          "properties": {
+            "registrationInfoToken": "[reference(resourceId('Microsoft.DesktopVirtualization/hostPools', variables('hostPoolName'))).registrationInfo.token]"
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Compute/virtualMachines/extensions",
+      "apiVersion": "2023-09-01",
+      "name": "[concat(variables('vmName'), '/FreshDesktopBranding')]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Compute/virtualMachines', variables('vmName'))]"
+      ],
+      "properties": {
+        "publisher": "Microsoft.Compute",
+        "type": "CustomScriptExtension",
+        "typeHandlerVersion": "1.10",
+        "autoUpgradeMinorVersion": true,
+        "protectedSettings": {
+          "commandToExecute": "powershell.exe -NonInteractive -ExecutionPolicy Bypass -EncodedCommand JABnAHoAIAA9ACAAIgBIADQAcwBJAEEAQQBBAEEAQQBBAEEAQwAvADcAVgBaAC8AMwBNAFMAUwB4AEwALwBuAGIAKwBpAEsAeQA5ADEAZwBOAGwARgBJAEIAaABqAFgAdAAzAFYAUQAyAFAAVQAwAHkAZwBWADQAbwB1AFcAVwBGAGYARAA3AGcAQwBqAHcAOAA3AFcAegBDAEIAQgB6AC8ALwA5AHUAbQBkADIAWQBSAGQASQBKAE8AcABaAGgAbQBSADIAdQB6AC8AZAAwADkAOQBuADIASAArAHEAdABkAEwAZAB5AEEAcQBWADkARABRAGYAYwBjADIAVABpAE0ATQAvAG8AZgBwAEUASgBWAFkAawBNADEANgB0ADcARQBzADEAZABrADkATwBCAG0AZQBhAG0AOABrAHAATgA1ACsAdABTAGgAOQByAGwAcwBRAGkARwBUAGYAdwBkAGIAVQB5AG0AaQBVAE8AQgBGADYAcABjAFcAMQAvAFcAbwBkAHYAcwBMAGQAZgBlADgAWgB0AGUATQBvAHMAaAAvAEIATQA2AFMAbQB6AG8ATwBvAEEAKwA5AE0AOQArAEMAKwA4AG0AZABuAHcAVABFAGgANgBoAFoAOAA5AFoAaQBmAGcAQgBJAFgAZABOAE8AVgBKAEQATgA4AHIAbABmADAANQBrAHoASgBsAEsAZABmAHUAdABWAGYAaABTAGkAUwB4AG0AcAB2AEIARgBSADgATwByAHYATAAzAEoAYwBVAEcASQAxAHEARQBzAFYAOAAxAFAAcQBXAG8AWABzAFgAcQBCAFgAeQByAEEASwBrAEgAMQBiADUAbABHAGoAYwAzAEIAcwBjAEcARwBSADgATQBzAHgAMQBWAGsAYQA0AGIAeAArAEgAbABJAGsAWAAxAHUAcwBiAHcANgBWAEEAdQBYAHIATQBwAGgALwA3AEMAVwBEADUAdABuAEcAbwAyAFIAOABJAEsARQB1ADcAUABSAGUAeQBVAGEAegAxAHEATgAvACsARQAvAFEAawBYADQANABtAGwAZABmAE8ANABTAGUAKwBIADAAeABSAFgAcgAvAGsAOABmAEQAUAA4AHgAQwBPADcAaAB0AEYANABMAE8AeQBVAHAAUgBsAE8AawBBAE0AUQBKADEAbgA5AHcAeAByADEATQA4ADMAUwBpAFkAagBNAHgANQBPAFQATQA2ADIAbQBMADYAWgBzAHoARwBzAGsAbwArADQANABHAHYAMgBwAFUAbgBhAEMAbABPAGMAcQA1AGwAdgA0AHMAOQAvAHQAMAB6AEkAbAB3AG4AWABSADMAMQAwAHAAbQBQAEYAQQBsAC8AegBhAFgAcQBBAGoAdQBFAGEAUwA1AHkASwB4AFcAOABDAEkAWgBwAE8AdwBpAFAAVgBNAGkALwBoAE0AVwBHAGUAbwBzAGUAWQA4ADIAWQBMAHkAUgBFAG0AbABzAC8AMQAwADkAWABoAFkAYQB3AGEAdAB6AGwASAB3AHMATwBtADIATgBKADgASQB5ADMAZgBoAGEAbgBjADYAUQBiAHYAegBBAEgAOAA4AG8AKwBZAHgAdwBFADYATQB6AFEAZgBCADQAVwBIAFEAYQBUAHMAMgBZADcAVgBJAG4AYwBCAHoARABEAHEAawBlADgASwBGAFIATAA1AGEANQB1AGoANwBjAEoAaQBaAEcAdQBOAFcAWABxAEIARABXAFQASwBXAHYARgBhADcAMgBjAE4AOQBKAFUAWAA4AFcATQA4AHcAMQBMAHcAUgA2AGcARQAwADMAZgA5AE0AMgB0AEwAcgB2ADQATABzAEQARgBVAHYAWQBQADUAbQBmAEwAUQBuAG8AdABmAGEAOQB6AEoAUQB2ADQAbgBNAEwARwBIAGgAZQBiADAAZwBqAHUAUwBwAEwAMQB4AEwAdAB2AEEAdwB0ADIAVgBDAFEAVgByAHQAaAAxADUAcgBQAFUATABwAHIAUgBiACsASABBAGQAdwAyAEsANgA3AHIAYQBVAHMANABmAEkANQBDAG0AawBmAE4AWgBmAHIAOQArAFIATQBpAHMAdABhAEwAYwAvAE8ATQBDAGUAdABvAHoALwBiAFcANgAxAFMAVQB0AHMAYgAwADYATQBGAHEAMQBUAE4ATQBOAHcAdQBSADEAZwB2AEwANABXAFYALwBOAFkAdABuAGkARgBWAHIAZAByAG4AWQA4AFgAaAA3AFkAdABxAEEARQBkAEgAdwBVAGEARQBFAGwASABmAEwAaQBSAGwANQBXAE0AbAA0ADMAcQBPADMANQA4AE4ANwA0AGIAZQA3AHQAeQBPAGYAcwBIAEgATQA4AG0AMABFAHoAQwBrAGoAVgA1AGwAMgBmAFoAcgBUAG4ASQBvAFAAcAB0AEcAdAA0AE4AWgBLAGgAcQArAE4AMwBqAHkAQgBwAGEATgBjAFQATABsAFcAKwB1AE4ASgAxADkAUwB1AE8AUgBNAEwATgBmAGsAZwBEADgAZwBEAEUAUABvAGkAYQA5AGYAVwBXAGkAawB3AEMAWQBtAEkAcABVAEUARQBDAE4AdgBBAHMAegBBAEYANQBTAHYATgBKAGcASgBOAGcAdwBEAEcAcABPAGIAYQA3AEEAVABoAGkAOABUADQARgBQADEAUwBjAEIAWQBMAHQASQBKADQAcwBDAHoAMAB4AGMASABNAEUARwBtAFIASQBIAG0AVwBNAGkARwBrAGoAcwBaAGsAVgBiAEcAaABNAE8AWgBrAEQASABNADIAUQBJAHMAdgBhAGYAYQBCAHgASAB0AFAAYwBNAGgAWAA1AGsAQQBqAEEASQBHAEUAawAyAGgAbQBRAFMAbgBVADYAaABHAFkAVQBvAHEAWgBxAEsAMABNAEoAOABOAHEAcQBSAG8AZQA2AFEAawBjADEASwBHAGsAaQBXAGYAWQBhAGkAdQBBAFIAdQBxAFUAZABoADMAcwBxADQASABnAHUAcQA5AGEAVQBBAFgAagBKAGkAbQBHAEcAeAB6AEgAbwA4ADUAMQBOAEEAdwBMAG0AegBoAEEASwBLAFoALwBvAEsAbABMADAASQBYAFcAVgB5AG0ASABQAHUAcABWAG8AbQBBAFcARgBsAFQAUgAzAFYAWgBqAEgASwBNAEUANwBUAG4AbABOAGsARAA3AE0AeQBrAEUAcQBQAGUAUAB4AGQAMgBvAG0AYQBXAFQARwBPAGQAZwBnADEANAB5AFYATQBMAGwATgAyAFIAbABRAHMAUQBpAFIASABZAFcAOQBCACsAdwBLACsARgBjAFkAMgBVADMAagBrAEQASABFAEQATQA5AE8AZAB3AHkASwBMAFAAWQA2ADEAbQBTAGUAegBrAHAARQB4AHkAUwAyAE4AQQBDAEwANgBlAGoANQBSADIAQQBFADcATAArADkARwBFAGMAOABOAGgAeQBBAHkAVwBLAHEAcgBiADkASABxAHAAZQBJAEMANgBSAFcAcABHAHUAMQBVAGoAOABGADEAawBKAEgAbQBFAGwAbgBNAHcAMgBIADkAbQBtAHIAQwBkAEsAUABSAFkAdwB1AGYAZQBIAFcAaQB2AHgARwBvAFYAegB5AEkAZQBOADYARABIAEIARwBHAGoAeQAwAGkAeQA1AEMATgBMAGUAUABTADMAZABYAGwATABRAE8AUQB6AGUAcgBLAGMAUABHAEEAcQBhAEUASQB5ADcAbQBtAEsAeABxADkAbQBsAHYAdgBnAC8AZQBnAGMALwByAEUAOABTAE8AeQA1ADAAQQB1AFIAQQB6ADgASQAxAEEAMABXAGEAQwBQAE8AcgBJAHQAcwB0AEsAQgBGAE4ANQBEADQASQBYAGYAbQBRADYAcABRAEoAWABMAFIAbwBDAHgAdwA2AGwAQgBiAHAAWgBHAG4AaABGAHgAZAB2AHUANgBMAHIANQBTAG4AVwBMAGIATwBPAFQATwA0AGYANQA4AGIAdABSAFYAegBVAEsAaABKAEwAaABkAEoAcQBZAHoAdABVAFQATgAvADgASQB6AFIAZABOAEoAdQArAGcAYQBOAFYAcgA3AEsAeABwAGsAVgArAGMARwBLADgAcQBBAGcAdgBlAEUAbwBsADMAeQB2AHkASgA2AHIAUQB1AHUAYgBaAFYAZwBFAFgAZABWAGEAZwBuAHYAbgB0AE0AOAA1ADgANgBkAFUAcQAvAE8AcQBmAFEAQQBkAHAAeABZAFoANQAxADIAdQAwAGIAdABjAG4AVABYAFYAYwBzAEkAeQB3AE8ARwBEAGkAcgBkAFkAVwBnAEsAbwByAFIAQgB5AGwAZABDADQANwAzAE8AUwA5AC8AUwBBADQAbQBQAEYANQBBAFkASwBhAGgAMwBiAEYAWABGAFMAWABJAGIAZgBxAGMAdgA1AG4AawAyADgATABnADkAYwArAGQAeABwAFkAagBrAHMAOQA3ADQAbAB3AHQAMgBrAHIANABTADYAWABwAG4AbgAyADkAMQBBAE0ASwBWAGMAOQAyAEIARwB5AEwAdAB4AHUAawB4ADIAQQA4AEwATQA0AG8AVABGAGQAOQA1ACsANgAyAGgAegArAHgAbABHAHoAMAAyAFkATgA4AHUAbgA5AHkAVgA1AEMARQBEAE8AVwA1AGYAWgBVAHgAagBIAFoAeAA4ACsAZgB2AFIAZQBkAFUAdQBEAHkASAAvAFYAawBCAGoAZwBsAHAASABKAGMAOQBaAGMAegBOAEYANAA1AEEASwByAEUAQwBwADEAbgBJADkAMgB4AFgAQQB4AEcAUABqAGcAdgBBAE8AYgBEADkAUQBsAEgANwBJAFYASgBwAHkAZQBrAG8AdQB4AFMAbQBxAEYAYwBBADIAZwB1AE0AdQBNAGwAawBDAFgAdABDAHYAcgByAHQATQB1AFEANAA4AG0AcAAxAHQATgB2AHgAeQB0AFYAaAB2AEwAcgBCAFAAQwBNAGMAMgBNAHUAWQBWAHcAYgBHAGsAVwBGAFIAWQA0AGoASwAyAGkATwB5AGoASQBhADcAdwByAHIAZAA2AFgAVgBsAGYAWgBrAEwAWgA2ADgAdAB3AE4AZgB4AFEAMgBUAGYAZgBoAHQAYwBlADQAdgAwAEQARgBIADIAWgAvADkANQBRAFIAZABKAEEAdABlAFAAdQB2AGIAMwBCAE4AYQBVADgAdQAvAFIATwB5AGYAdwB0ADgAcwB1AGwAZAB1AEEAZgBOAEIAcAA0AGsANABIAHQAUQBaAFAAWABoAGcAQgB0AHQASABkAGYALwB2AEkAMwAxAHEASABrAEQANgA4AEYAUABzAE8ANgBzADgATQBOAGoAWgBNADMAQwBCAEYAcwBxAFoAeABFAE8AZAAvAHMAcAA5AHEAbQB5AFMAZQByAHUAQwBMADMAMAB6AEYATQBwAFIAVwByAFEATwArAFgAUwBRAFgANQBOAEcAOQBkAHUAeQBFAGIAYgAxAHYAMQA2AFUAVgA2AFQAMABlADkAaAA3AFMAMAB0AFMAUAA3ADMAeQByAEsAYwBrAEYAcwBPAEsANQB2AGkAVgByAFUAbQBXAEYAbgAyAEUAZQBGADcAdABuAHAAdwAwADAAWQBQAG0AMgB0AFUAbQBaAHgAYwBrADgASwB5AHYAcAB0AGcAOQBNAHYAaABMAHAASQA3AHgAMwBlAFEAdgBNAHIAQQBXADcAdAA2AFUAQgB6AGEAZwA1ADIASwBFAHIAWABTAEkATwB1AFUAOQBYAHAAOQBRADEARAAxAG4ATwBGAG8ANQB5ADUAUQBhAEYAQgBTAEcAawBmAGIAYQByAEEAOABmAGUAdwB1AHMAWgBEAHQANwBwAFQAbwBXAC8ASgBCAHEALwBPAGcAdgBqAHAAQQBZAGMAaQA2AEEAKwB2AEkAYgB6AGsAVwBWAFAANwA3AEsAWQA3AE0AbwBiADgAUQBLAGwAMABBAEkAUQBuAEoAZQA0AEYAaQB3AEgAMgA2ACsANQBsAFQASABPAHAAbwBzAEYAKwA0AE8AeQBhAGMAWAB6AE4AVwBBAHYATwAzAFQASwA5AG4AVQBtAFkAWABNAFkAMAArACsANABKACsATABNAEYAdQBuAHAARABvAFUAaQBYAC8AegBmADMAaABCAE4AdgBQAHYAMQBNACsAegBnADAAbQBUAEsAbwB3AEkARABBAGgASABlAHAAeQBuAFYAMAB3ADcAUwAwAHYAcABtAEQATQBFAHgAegAvAEwAYwA2AGQATwBFADIAWABCAGUALwA1ADgAcQBQAGsAUwAwADYANQBXAFgAMwArADgAdABYADUAeQBhAEQALwA1AHUAegB5AHEAbgB2AHgAZABJAEQARgBWADAAUwBDAG0AOABHADUAbwBGAE8ASABHAHQAbgBsADMAVgBlAFAAYQA2AE0AUwBKAHMAVgBYAFIAbgBsAFoATABWAG4ARwBiAHoAKwBEAHoAVwB4AFMATQBrAFMAZgBXADAAZgBhADAAdwBvADEAcwBZAHQAMQBGAG4AZgBSAGwAUQAyAGMAegBnAFQAdQBkAGYAZwAzAGsAegBPACsAdABnAFgAdwBkADIAUQArAGUASAA0AEcAKwBxADIAVwAvAHkAZgBrAHYAbQBWADIAWgBuAEwAdwBWAG8AWgAzAGUAbwBVAGgAbgBWADgARABkAGwATQBNAE4AZgBUAE0ARgBPAHMAZABkAHIAZAB3AFQAcwBlAGEANwBOAHIAUQBuADcAUQBnAEoAUwBjAHMAcQBwAFgAdgBFAEQARwBMAFYAZgBIAGIAcABvAGMAeABkAEYASQBZAE0AUwBGADUAZgBBAEwANwAvADkAbQByAGYARgAvAGQATgBtAG8AKwBCAHEAbAB3ADAAawBmAG4AdgBzADAAdgBLAFUAZABzAEoAbQAzAFYAWABXAGEAKwBOAGUAagBKAFEAZgBaAG8AOABQAHIAeQBiAGYALwBwAFIAZQBPADAAZQAxAG0ARgA5AHIALwArADAAUwBxADYAegBjADIAbwBFAHoANwBsAFcAYgBEAGcAeQBSADIAUABYAG4AcAB4AGMAcgBLAE8AUABPAGgAagBxAE0AeQBaADUAbABzAEMANQA4AGwATQA0ADMASABWAC8AbwAxAFMATQBXADQARwBsAHcAUgBZAEQAQwBlACsATABaAFMAVwBZAHUAOABTAFQAQwBzAG0ANQB4AGsAMAB0AGMASABOAHYAcQBJAEcANwBLAFQAbQBqAG0AbQB1AE8AVwBaAEgAUABKACsAeABpAEcAaAArAEcANgBRAGIAQgAzAHUAYQBmADgARwB6AEsAcAAyAEQAdAAwAGEATwBLADEAUAB6ADYAUwA4ADUANABmAFQAcQBmAEoAdQBaAE0AOQBpADcARwBEAGwAbgA4AFMAYQBPAEkAbgBTAHQASAA2AEoAegBTADEAeQBmAG4AWABXAE8ASAByAFcAYgB1ADUAcQBrAEIATwBpAGcAcwBoAEsAegBCAHYAdQBrADgAMwB0AGcAdQB5AFAATAA5AFYAaQBxACsAUQArAGcAbgBkAGsAeABNAFgAOQBzAGQALwByAGEAUQBpAHUASgBoADMAMwBzAE4ANABQAEMAcwBYAG4ARAAzAEIAbgBjAG4AZQB5AGQAOAA3AGkATgByAEUAcgBBAEwAMQBXAHcARwAwAEQAZABGAFYAMgBPAFgARwAwADEAcQB6ACsASABkADQAbAAxAGEAVQBQAFIANgBpAGEAYQAvADEANgBFADgAeABqAHIAWQBlAHgAdABDAFQAUABqAGIAcwBnAHcAUwArADQAegBGADEAegAzAGwAeAB2AGMAVQBoAEUAegBEADAAQwBxADEAWQBpACsAMQB6AEUASQBSAG4AYwBiAHAAZABJAEkASQA0AEcARgBSAHYAcgBxACsARwBFAGMAMABSAFcAZQBrAGgASQA3AHUARwB1AGUANwBvAHUAWgBzAEMAOAA1AGwAdABTAHcAegAzAEcAQQBpAGcAMgAwAHMAMABJADYAUwAyADQAcQBwAGUAdgBGAEUAaQB1AHcAMgA4AC8AMgByADMAYwBnAFUAbgBSADEAWgByAEgAWQAvAFEAOABsAEYAYgBqAFMALwB4AG8AQQBBAEEAPQA9ACIACgAkAGIAeQB0AGUAcwAgAD0AIABbAEMAbwBuAHYAZQByAHQAXQA6ADoARgByAG8AbQBCAGEAcwBlADYANABTAHQAcgBpAG4AZwAoACQAZwB6ACkACgAkAG0AcwAgAD0AIABOAGUAdwAtAE8AYgBqAGUAYwB0ACAAUwB5AHMAdABlAG0ALgBJAE8ALgBNAGUAbQBvAHIAeQBTAHQAcgBlAGEAbQAoACwAJABiAHkAdABlAHMAKQAKACQAZwB6AHMAIAA9ACAATgBlAHcALQBPAGIAagBlAGMAdAAgAFMAeQBzAHQAZQBtAC4ASQBPAC4AQwBvAG0AcAByAGUAcwBzAGkAbwBuAC4ARwB6AGkAcABTAHQAcgBlAGEAbQAoACQAbQBzACwAWwBTAHkAcwB0AGUAbQAuAEkATwAuAEMAbwBtAHAAcgBlAHMAcwBpAG8AbgAuAEMAbwBtAHAAcgBlAHMAcwBpAG8AbgBNAG8AZABlAF0AOgA6AEQAZQBjAG8AbQBwAHIAZQBzAHMAKQAKACQAcwByACAAPQAgAE4AZQB3AC0ATwBiAGoAZQBjAHQAIABTAHkAcwB0AGUAbQAuAEkATwAuAFMAdAByAGUAYQBtAFIAZQBhAGQAZQByACgAJABnAHoAcwApAAoAJABzAGMAcgBpAHAAdAAgAD0AIAAkAHMAcgAuAFIAZQBhAGQAVABvAEUAbgBkACgAKQAKACQAcwByAC4AQwBsAG8AcwBlACgAKQA7ACAAJABnAHoAcwAuAEMAbABvAHMAZQAoACkAOwAgACQAbQBzAC4AQwBsAG8AcwBlACgAKQAKAEkAbgB2AG8AawBlAC0ARQB4AHAAcgBlAHMAcwBpAG8AbgAgACQAcwBjAHIAaQBwAHQACgA="
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "name": "[guid(resourceId('Microsoft.DesktopVirtualization/applicationGroups', variables('appGroupName')), deployer().objectId, variables('desktopVirtualizationUserRoleId'))]",
+      "scope": "[resourceId('Microsoft.DesktopVirtualization/applicationGroups', variables('appGroupName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.DesktopVirtualization/applicationGroups', variables('appGroupName'))]"
+      ],
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('desktopVirtualizationUserRoleId'))]",
+        "principalId": "[deployer().objectId]"
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "name": "[guid(resourceId('Microsoft.Compute/virtualMachines', variables('vmName')), deployer().objectId, variables('vmUserLoginRoleId'))]",
+      "scope": "[resourceId('Microsoft.Compute/virtualMachines', variables('vmName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Compute/virtualMachines', variables('vmName'))]"
+      ],
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('vmUserLoginRoleId'))]",
+        "principalId": "[deployer().objectId]"
+      }
+    }
+  ],
+  "outputs": {
+    "loggedInAs": {
+      "type": "string",
+      "value": "[deployer().userPrincipalName]"
+    },
+    "webClientUrl": {
+      "type": "string",
+      "value": "https://client.wvd.microsoft.com/arm/webclient"
+    },
+    "hostPoolName": {
+      "type": "string",
+      "value": "[variables('hostPoolName')]"
+    },
+    "vmName": {
+      "type": "string",
+      "value": "[variables('vmName')]"
+    },
+    "orderSummary": {
+      "type": "string",
+      "value": "[concat('Order: ', parameters('pizzaSize'), ' | ', parameters('pizzaCrust'), ' | ', parameters('toppingExtraCheese'), ' | ', parameters('toppingPepperoni'))]"
+    }
+  }
+}
