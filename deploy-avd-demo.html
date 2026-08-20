@@ -3,6 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <title>Fresh Desktop — One-Click AVD</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext x='50' y='68' font-size='72' text-anchor='middle'%3E%F0%9F%8D%95%3C/text%3E%3C/svg%3E">
+
 <style>
   :root {
     --bg: #000000;
@@ -295,6 +297,15 @@
     to { opacity: 1; transform: translateY(0); }
   }
 
+  /* --- One-time attention cue: draws the eye to the readiness check once it's likely relevant --- */
+  .pulse-attention {
+    animation: pulseAttention 1.1s ease-in-out infinite;
+  }
+  @keyframes pulseAttention {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(205,33,42,0.55); }
+    50% { box-shadow: 0 0 0 8px rgba(205,33,42,0); }
+  }
+
   /* --- Live cost calculator --- */
   .pizza-calc-track {
     display: flex;
@@ -422,7 +433,7 @@
 
   <div class="card" id="sizeCard">
     <h2><span class="step-num">1</span> Pick your Pizza Size</h2>
-    <p class="muted" style="margin-bottom:6px;">Sets the session host's VM size &mdash; match it in the Portal's Basics tab in Step 4.</p>
+    <p class="muted" style="margin-bottom:6px;">Sets the session host's VM size &mdash; match it in the Portal's Basics tab in Step 5.</p>
     <div class="pizza-calc-track" id="calcSizeTrack"></div>
   </div>
 
@@ -434,12 +445,23 @@
 
   <div class="card step-hidden" id="toppingCard">
     <h2><span class="step-num">3</span> Pick your Toppings (image)</h2>
-    <p class="muted" style="margin-bottom:6px;">Sets the Windows 11 desktop image &mdash; Sausage and Pepperoni both take a little longer to boot the first time (Microsoft 365 Apps preinstalled).</p>
+    <p class="muted" style="margin-bottom:6px;">Sets the Windows 11 Enterprise desktop image version &mdash; single-session (switched from multi-session AVD images 2026-08-20 to match the Personal host pool). Sausage additionally installs Microsoft 365 Apps in the background during setup (a real post-install step, not a pre-baked image) &mdash; on Family Size or Large Party it typically finishes before you're even able to log in; on Personal Pan it may still be finishing.</p>
     <div class="pizza-calc-track" id="calcToppingTrack"></div>
   </div>
 
+  <div class="card step-hidden" id="deliveryCard">
+    <h2><span class="step-num">4</span> Pickup or Delivery? (networking)</h2>
+    <p class="muted" style="margin-bottom:6px;">How the session host reaches the internet &mdash; it never has a public IP or accepts inbound traffic either way.</p>
+    <div class="pizza-calc-track">
+      <button type="button" class="btn-ghost pizza-calc-btn active" disabled>🛍️ Pickup<br><span class="pizza-calc-sub">NAT Gateway &mdash; simple outbound-only egress</span></button>
+      <button type="button" class="btn-ghost pizza-calc-btn" disabled style="opacity:0.5; cursor:not-allowed;">🚚 Delivery <span style="font-size:10px;">(Coming Soon)</span><br><span class="pizza-calc-sub">Azure Firewall Basic &mdash; governed/filtered egress</span></button>
+    </div>
+    <p class="muted" style="margin-top:8px; font-size:11px;">Pickup (NAT Gateway) is the only working option for now &mdash; Delivery (Azure Firewall Basic, FQDN-filtered egress) is planned but not yet built. Both keep the VM off the public internet either way.</p>
+    <button class="btn-primary" onclick="revealStep('deployCard')" style="margin-top:4px;">Continue &rarr;</button>
+  </div>
+
   <div class="card step-hidden" id="deployCard">
-    <h2><span class="step-num">4</span> Get your password ready &amp; deploy</h2>
+    <h2><span class="step-num">5</span> Get your password ready &amp; deploy</h2>
     <p class="muted" style="margin-bottom:6px;">Generate a local admin password, then deploy &mdash; match your picks above in the Portal's Basics tab when it opens.</p>
 
     <div class="calc-numbers">
@@ -472,7 +494,7 @@
   </div>
 
   <div class="card step-hidden" id="trackCard">
-    <h2><span class="step-num">5</span> Track your order</h2>
+    <h2><span class="step-num">6</span> Track your order</h2>
     <p class="muted">Started automatically the moment you clicked Deploy. Nudge it if the real deployment in the portal tab runs ahead or behind.</p>
     <div class="tracker-controls">
       <div class="speed-toggle" style="margin-left:0;">
@@ -480,7 +502,10 @@
         <button id="speed1" class="active" onclick="setSpeed(1)">1x (live)</button>
         <button id="speed8" onclick="setSpeed(8)">8x (rehearse)</button>
       </div>
-      <button class="btn-ghost" onclick="resetTracker()" style="margin-left:auto;">Reset</button>
+      <div style="margin-left:auto; display:flex; gap:10px;">
+        <button class="btn-ghost" id="imInBtn" onclick="markDelivered()">✅ I'm In!</button>
+        <button class="btn-ghost" onclick="resetTracker()">Reset</button>
+      </div>
     </div>
 
     <div class="stage-track" id="stageTrack">
@@ -498,19 +523,25 @@
     <p class="est-note">Synced to typical deploy timing (~18 min). Click any stage icon anytime to jump the tracker there if the real deployment runs ahead or behind &mdash; you're always in control on stage.</p>
 
     <div class="delivered-banner" id="deliveredBanner">
-      <div style="font-size:28px;">🍕 Fresh Out of the Oven!</div>
+      <div style="font-size:28px;">🛵 Delivered!</div>
       <p style="margin:6px 0 0 0;">Your Fresh Desktop is hot and ready. Go log in below.</p>
     </div>
   </div>
 
+  <div class="card step-hidden" id="readinessCheckCard">
+    <h2>🔎 Confirm your session host is actually ready</h2>
+    <p style="color:#f0c96b; font-size:14px;">⚠️ ARM saying the deployment "Succeeded" only means the extensions ran &mdash; it does <strong>not</strong> mean the session host has finished registering with the host pool yet. Logging in before that shows a connection error even though the deployment is done. Check first: <strong>Host pools → <span id="hostPoolNameHint">avddemo-hp</span> → Session hosts</strong> and confirm the status column says <strong>Available</strong> (not Unavailable / Needs Assistance / Upgrading &mdash; those mean not ready yet, give it another minute and refresh).</p>
+    <a class="btn-primary" id="checkSessionHostBtn" style="margin-bottom:0;" href="https://portal.azure.com/#view/HubsExtension/BrowseResource/resourceType/Microsoft.DesktopVirtualization%2FhostPools" target="_blank" onclick="clearAttentionCue()">🔎 Check Session Host Status &rarr;</a>
+  </div>
+
   <div class="card step-hidden" id="loginCard">
-    <h2><span class="step-num">6</span> Log in to your Fresh Desktop</h2>
+    <h2><span class="step-num">7</span> Log in to your Fresh Desktop</h2>
     <p>Sign in with the same Microsoft&nbsp;Entra account you deployed with&mdash;your desktop is already assigned, no extra setup.</p>
     <a class="btn-deploy show" id="openDesktopLink" style="background:var(--accent); color:white;" href="https://client.wvd.microsoft.com/arm/webclient/" target="_blank" onclick="onOpenDesktopClick()">🖥️ Open AVD Web Client &rarr;</a>
   </div>
 
   <div class="card step-hidden" id="cleanupCard">
-    <h2><span class="step-num">7</span> Clean up when you're done</h2>
+    <h2><span class="step-num">8</span> Clean up when you're done</h2>
     <p>This spins up a real VM that bills by the hour. Unlike GitHub's API, Azure's own sign-in and management endpoints don't allow a webpage to call them directly from the browser (no CORS) &mdash; so this can't be a single silent click the way Deploy is. This is the fastest real alternative: type the resource group name you used in the portal, click once, and both the command is on your clipboard <em>and</em> Cloud Shell is open ready to paste it into.</p>
     <input type="text" id="cleanupRgName" placeholder="Resource group name (whatever you typed in the portal's Basics tab)">
     <div class="status-row">
@@ -555,6 +586,7 @@ function deployToAzure() {
   // timer both kick off from here instead of needing their own separate manual Start button.
   startPresoTimer();
   revealStep('trackCard');
+  revealStep('readinessCheckCard', false);
   startTracker();
 }
 
@@ -621,7 +653,7 @@ function legacyCopy(field) {
 }
 
 // Single combined action: generate a fresh password, copy it to the clipboard, and optionally
-// download an encrypted backup (per the checkbox). Step 4 (this card) is visible from page load —
+// download an encrypted backup (per the checkbox). Step 5 (this card) is visible from page load —
 // only the password field itself stays hidden until this has actually run once.
 async function generateAndCopyPassword() {
   const field = document.getElementById('vmAdminPassword');
@@ -860,7 +892,7 @@ renderPresoTimer();
 // Static, single-file page with no backend (same constraint as Deploy/Cleanup above) — pricing is
 // fetched client-side straight from the public Azure Retail Prices API so it stays accurate without
 // manual updates. Falls back to a small hardcoded rate table if that call fails or is CORS/network-blocked.
-// Feeds Steps 1-3's selector tracks (Pizza Size / Crust / Toppings), renders the combined total in Step 4,
+// Feeds Steps 1-3's selector tracks (Pizza Size / Crust / Toppings), renders the combined total in Step 5,
 // and mirrors into the top-right badge (replaced by the presentation timer once Deploy is clicked).
 const PRICE_REGION = 'northcentralus';
 // Keys/labels mirror azuredeploy.json's pizzaSize allowedValues + vmSizeMap exactly.
@@ -877,10 +909,13 @@ const CRUST_MAP = {
 };
 // Mirrors azuredeploy.json's pizzaToppings allowedValues exactly. This is the Windows 11 image.
 // Doesn't affect price — display/order-summary only.
+// Updated 2026-08-20: single-session Windows 11 Enterprise (win11-*-ent), not multi-session AVD
+// images — matches the Personal host pool switch (D-3). No marketplace SKU bundles Microsoft 365
+// Apps for single-session Enterprise under this publisher/offer, so toppings are OS version only now.
 const TOPPING_MAP = {
-  cheese:    { key: 'cheese',    label: '🧀 Cheese', sub: 'Windows 11 24H2, no apps' },
-  sausage:   { key: 'sausage',   label: '🌭 Sausage', sub: '24H2 + Microsoft 365 Apps' },
-  pepperoni: { key: 'pepperoni', label: '🍕 Pepperoni', sub: '23H2 + Microsoft 365 Apps' }
+  cheese:    { key: 'cheese',    label: '🧀 Cheese', sub: 'Windows 11 24H2 Enterprise' },
+  sausage:   { key: 'sausage',   label: '🌭 Sausage', sub: '25H2 + Microsoft 365 Apps (installs during setup)' },
+  pepperoni: { key: 'pepperoni', label: '🍕 Pepperoni', sub: 'Windows 11 23H2 Enterprise (older)' }
 };
 
 // Fallback-only rates, used if the live API call fails or is blocked. Approximate northcentralus
@@ -1029,7 +1064,7 @@ function renderPriceCalc() {
 function selectCalc(group, key) {
   if (group === 'size') { priceState.selectedSize = key; revealStep('crustCard'); }
   else if (group === 'crust') { priceState.selectedCrust = key; revealStep('toppingCard'); }
-  else if (group === 'topping') { priceState.selectedTopping = key; revealStep('deployCard'); }
+  else if (group === 'topping') { priceState.selectedTopping = key; revealStep('deliveryCard'); }
   renderPriceCalc();
 }
 
@@ -1080,9 +1115,14 @@ function copyCleanupCommand() {
   ta.value = cmd;
   ta.style.position = 'fixed';
   ta.style.left = '-9999px';
+  ta.readOnly = true; // avoids the on-screen keyboard popping up on iOS while still allowing selection
   document.body.appendChild(ta);
   ta.focus();
   ta.select();
+  // iOS Safari's select() alone is unreliable on <textarea> elements (a well-documented failure mode —
+  // R-8, Phase 4 grill 2026-08-20) — an explicit setSelectionRange is required for execCommand('copy')
+  // to actually have something selected to copy on that platform.
+  ta.setSelectionRange(0, ta.value.length);
   let copied = false;
   try { copied = document.execCommand('copy'); } catch (e) { copied = false; }
   document.body.removeChild(ta);
@@ -1109,8 +1149,8 @@ const STAGES = [
   { emoji: '🧾', title: 'Order Placed', blurb: 'Resource group, network, host pool, workspace & app group going in.', durationMs: 2 * 60000 },
   { emoji: '🧑‍🍳', title: 'Prepping Your Pie', blurb: 'Session host VM is being built.', durationMs: 4 * 60000 },
   { emoji: '🔥', title: 'In the Oven', blurb: 'Joining Microsoft Entra ID — no domain controller in sight.', durationMs: 6 * 60000 },
-  { emoji: '🛵', title: 'Out for Delivery', blurb: 'AVD agent is registering your session host with the host pool.', durationMs: 6 * 60000 },
-  { emoji: '🍕', title: 'Fresh Out of the Oven', blurb: "Your Fresh Desktop is hot and ready. Go log in.", durationMs: 0 }
+  { emoji: '🍕', title: 'Fresh Out of the Oven', blurb: 'AVD agent is registering your session host with the host pool.', durationMs: 6 * 60000 },
+  { emoji: '🛵', title: 'Delivered', blurb: "Your Fresh Desktop is hot and ready. Go log in.", durationMs: 0 }
 ];
 const cumulative = [];
 STAGES.reduce((acc, s, i) => { cumulative[i] = acc; return acc + s.durationMs; }, 0);
@@ -1120,6 +1160,7 @@ let elapsedMs = 0;
 let speed = 1;
 let timer = null;
 let lastTick = null;
+let attentionFired = false;
 
 const track = document.getElementById('stageTrack');
 STAGES.forEach((s, i) => {
@@ -1159,6 +1200,15 @@ function render() {
   document.getElementById('stageTitle').textContent = stage.emoji + ' ' + stage.title;
   document.getElementById('stageBlurb').textContent = stage.blurb;
 
+  // One-time nudge toward the readiness check right when things are "probably ready" (index 3,
+  // "Fresh Out of the Oven") — not at "definitely done" (index 4, "Delivered"), since that's what
+  // the manual check/login already confirm.
+  if (idx === 3 && !attentionFired) {
+    attentionFired = true;
+    const checkBtn = document.getElementById('checkSessionHostBtn');
+    if (checkBtn) checkBtn.classList.add('pulse-attention');
+  }
+
   const totalSec = Math.floor(elapsedMs / 1000);
   const m = Math.floor(totalSec / 60);
   const sSec = totalSec % 60;
@@ -1191,14 +1241,30 @@ function startTracker() {
 function resetTracker() {
   if (timer) { clearInterval(timer); timer = null; }
   elapsedMs = 0;
+  attentionFired = false;
+  hideStep('readinessCheckCard');
   hideStep('loginCard');
   hideStep('cleanupCard');
+  clearAttentionCue();
   render();
 }
 
 function jumpToStage(i) {
   elapsedMs = cumulative[i];
   render();
+}
+
+// Manual override: the presenter has already confirmed (via the readiness check or a successful
+// login) that it's real, so skip the rest of the choreographed timer instead of waiting for the
+// animation to catch up. Reuses render()'s existing delivered-branch logic rather than duplicating it.
+function markDelivered() {
+  elapsedMs = TOTAL_MS;
+  render();
+}
+
+function clearAttentionCue() {
+  const checkBtn = document.getElementById('checkSessionHostBtn');
+  if (checkBtn) checkBtn.classList.remove('pulse-attention');
 }
 
 render();
