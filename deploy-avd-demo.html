@@ -408,26 +408,25 @@
   <div class="card">
     <h2><span class="step-num">1</span> Get a VM admin password ready</h2>
     <p class="muted" style="margin-bottom:6px;">The portal's Basics tab will ask for a local admin password for the session host. Generate one here first &mdash; it's typed straight into this field, never sent anywhere &mdash; then paste it into the portal in Step 2.</p>
-    <input type="text" id="vmAdminPassword" placeholder="Click Generate below" readonly>
+    <input type="password" id="vmAdminPassword" placeholder="Click Generate &amp; Copy below" readonly>
     <div class="status-row">
-      <button class="btn-ghost" onclick="generatePassword()">🎲 Generate</button>
-      <button class="btn-ghost" onclick="copyPassword()">📋 Copy</button>
+      <button class="btn-primary" id="genCopyBtn" onclick="generateAndCopyPassword()">🎲 Generate &amp; Copy</button>
+      <button class="btn-ghost" id="togglePwBtn" onclick="toggleShowPassword()">👁 Show</button>
     </div>
     <input type="password" id="encryptPassphrase" placeholder="Passphrase to protect the downloaded file (8+ chars)" style="margin-top:12px;">
     <div class="status-row">
-      <button class="btn-ghost" onclick="downloadEncryptedPassword()">⬇ Download Encrypted File</button>
+      <input type="checkbox" id="downloadEncCheckbox" style="width:16px; height:16px; margin:0; accent-color: var(--accent);">
+      <label for="downloadEncCheckbox" class="muted" style="cursor:pointer;">Also download an encrypted backup file</label>
     </div>
     <p class="status-text" id="pwStatus" style="margin-top:8px;"></p>
   </div>
 
-  <div class="card">
+  <div class="card step-hidden" id="deployCard">
     <h2><span class="step-num">2</span> Build your order &amp; deploy</h2>
-    <p>One click opens the Azure Portal's own deployment page&mdash;pre-loaded straight from the template's permanent home on GitHub, with real dropdowns for <strong>Pizza Size</strong> (VM size), <strong>Crust</strong> (Windows 11 image), and <strong>Toppings</strong> (session capacity + clipboard/drive redirection). Defaults are already picked, so Review + Create works with zero clicks&mdash;or change them live for the crowd. Paste the password from Step 1 into the Basics tab when it asks.</p>
-    <button class="btn-primary" id="deployMainBtn" onclick="deployToAzure()">🚀 Deploy to Azure</button>
-    <p class="status-text" id="publishStatus" style="margin-top:10px;"></p>
+    <p>One click opens the Azure Portal's own deployment page&mdash;pre-loaded straight from the template's permanent home on GitHub, with real dropdowns for <strong>Pizza Size</strong> (VM size), <strong>Crust</strong> (Windows 11 image &mdash; 24H2, 23H2, or 24H2 + M365 Apps), and <strong>Toppings</strong> (session capacity, clipboard/drive redirection, and OS disk tier). Defaults are already picked, so Review + Create works with zero clicks&mdash;or change them live for the crowd. Every combination still deploys in the same ~18&nbsp;minutes. Paste the password from Step 1 into the Basics tab when it asks.</p>
 
     <div style="margin-top:18px; padding-top:18px; border-top:1px solid var(--border);">
-      <p class="muted" style="margin-bottom:6px;">💰 Live menu pricing &mdash; pick the same Pizza Size you'll choose in the portal's Basics tab to see what it actually costs (compute + OS disk + networking) before you click Create.</p>
+      <p class="muted" style="margin-bottom:6px;">💰 Live menu pricing &mdash; pick the same Pizza Size you'll choose in the portal's Basics tab to see what it actually costs (compute + OS disk + networking) before you click Create. Priced at the default Regular Sauce (Standard SSD) disk tier &mdash; picking Light or Extra Sauce in the portal shifts the disk line slightly.</p>
       <div class="pizza-calc-track" id="calcSizeTrack"></div>
       <div class="calc-numbers">
         <div class="calc-hourly" id="calcHourly">Loading live Azure pricing&hellip;</div>
@@ -437,6 +436,9 @@
       <p class="muted" id="calcBreakdown" style="margin-top:8px; font-size:12px;"></p>
       <p class="status-text" id="calcSourceNote" style="margin-top:8px;"></p>
     </div>
+
+    <button class="btn-primary" id="deployMainBtn" onclick="deployToAzure()" style="margin-top:18px;">🚀 Deploy to Azure</button>
+    <p class="status-text" id="publishStatus" style="margin-top:10px;"></p>
   </div>
 
   <div class="card step-hidden" id="trackCard">
@@ -551,39 +553,57 @@ function generateStrongPassword(length) {
   return chars.join('');
 }
 
-function generatePassword() {
-  document.getElementById('vmAdminPassword').value = generateStrongPassword(16);
-  const statusEl = document.getElementById('pwStatus');
-  statusEl.textContent = '✅ Generated — meets Azure\'s 12+ char / 3-of-4 complexity rule.';
-  statusEl.style.color = '#7fffa0';
+function toggleShowPassword() {
+  const field = document.getElementById('vmAdminPassword');
+  const btn = document.getElementById('togglePwBtn');
+  const showing = field.type === 'text';
+  field.type = showing ? 'password' : 'text';
+  btn.textContent = showing ? '👁 Show' : '🙈 Hide';
 }
 
-function copyPassword() {
-  const field = document.getElementById('vmAdminPassword');
-  const statusEl = document.getElementById('pwStatus');
-  if (!field.value) {
-    statusEl.textContent = '⚠ Generate a password first.';
-    statusEl.style.color = '#f87171';
-    return;
-  }
+// Copies the field's value to the clipboard and resolves true/false — never touches status text
+// itself, so callers can fold the result into one combined message.
+function copyFieldValue(field) {
   field.select();
   let copied = false;
   try { copied = document.execCommand('copy'); } catch (e) { copied = false; }
-  if (copied) {
-    statusEl.textContent = '✅ Copied to clipboard.';
-    statusEl.style.color = '#7fffa0';
-  } else if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(field.value).then(function () {
-      statusEl.textContent = '✅ Copied to clipboard.';
-      statusEl.style.color = '#7fffa0';
-    }).catch(function () {
-      statusEl.textContent = 'Could not auto-copy — select the field and copy manually.';
-      statusEl.style.color = '#f87171';
-    });
-  } else {
-    statusEl.textContent = 'Could not auto-copy — select the field and copy manually.';
-    statusEl.style.color = '#f87171';
+  if (copied) return Promise.resolve(true);
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(field.value).then(function () { return true; }).catch(function () { return false; });
   }
+  return Promise.resolve(false);
+}
+
+// Single combined action: generate a fresh password, copy it to the clipboard, optionally
+// download an encrypted backup (per the checkbox), then reveal Step 2 — the deploy card stays
+// hidden until this has actually happened.
+async function generateAndCopyPassword() {
+  const field = document.getElementById('vmAdminPassword');
+  const statusEl = document.getElementById('pwStatus');
+  const passField = document.getElementById('encryptPassphrase');
+  const downloadWanted = document.getElementById('downloadEncCheckbox').checked;
+
+  field.value = generateStrongPassword(16);
+  const copied = await copyFieldValue(field);
+
+  let msg = copied ? '✅ Generated & copied to clipboard.' : '✅ Generated — could not auto-copy, select the field and copy manually.';
+  let color = copied ? '#7fffa0' : '#f87171';
+
+  if (downloadWanted) {
+    if (passField.value && passField.value.length >= 8) {
+      const downloaded = await downloadEncryptedPassword(true);
+      msg += downloaded ? ' Encrypted backup downloaded.' : ' Backup download failed — try a different browser.';
+      if (!downloaded) color = '#f87171';
+    } else {
+      msg += ' Enter an 8+ char passphrase above and click again to also download an encrypted backup.';
+      color = '#f87171';
+    }
+  }
+
+  statusEl.textContent = msg;
+  statusEl.style.color = color;
+
+  revealStep('deployCard');
 }
 
 function bufToB64(buf) {
@@ -637,19 +657,19 @@ function buildDecryptHtml(salt, iv, ciphertext) {
     '</body></html>';
 }
 
-async function downloadEncryptedPassword() {
+// silent=true skips writing its own status message and instead resolves true/false, so
+// generateAndCopyPassword() can fold the result into one combined status line.
+async function downloadEncryptedPassword(silent) {
   const pwField = document.getElementById('vmAdminPassword');
   const passField = document.getElementById('encryptPassphrase');
   const statusEl = document.getElementById('pwStatus');
   if (!pwField.value) {
-    statusEl.textContent = '⚠ Generate a password first.';
-    statusEl.style.color = '#f87171';
-    return;
+    if (!silent) { statusEl.textContent = '⚠ Generate a password first.'; statusEl.style.color = '#f87171'; }
+    return false;
   }
   if (!passField.value || passField.value.length < 8) {
-    statusEl.textContent = '⚠ Enter an 8+ character passphrase to protect the file.';
-    statusEl.style.color = '#f87171';
-    return;
+    if (!silent) { statusEl.textContent = '⚠ Enter an 8+ character passphrase to protect the file.'; statusEl.style.color = '#f87171'; }
+    return false;
   }
   try {
     const enc = await encryptPassword(pwField.value, passField.value);
@@ -663,11 +683,14 @@ async function downloadEncryptedPassword() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    statusEl.textContent = '✅ Downloaded. Open that file later and enter the same passphrase to reveal the password — nothing leaves your browser either time.';
-    statusEl.style.color = '#7fffa0';
+    if (!silent) {
+      statusEl.textContent = '✅ Downloaded. Open that file later and enter the same passphrase to reveal the password — nothing leaves your browser either time.';
+      statusEl.style.color = '#7fffa0';
+    }
+    return true;
   } catch (e) {
-    statusEl.textContent = '⚠ Encryption failed — try a different browser (needs Web Crypto support).';
-    statusEl.style.color = '#f87171';
+    if (!silent) { statusEl.textContent = '⚠ Encryption failed — try a different browser (needs Web Crypto support).'; statusEl.style.color = '#f87171'; }
+    return false;
   }
 }
 
