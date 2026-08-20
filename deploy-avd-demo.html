@@ -408,10 +408,14 @@
   <div class="card">
     <h2><span class="step-num">1</span> Get a VM admin password ready</h2>
     <p class="muted" style="margin-bottom:6px;">The portal's Basics tab will ask for a local admin password for the session host. Generate one here first &mdash; it's typed straight into this field, never sent anywhere &mdash; then paste it into the portal in Step 2.</p>
-    <input type="password" id="vmAdminPassword" placeholder="Click Generate &amp; Copy below" readonly>
     <div class="status-row">
       <button class="btn-primary" id="genCopyBtn" onclick="generateAndCopyPassword()">🎲 Generate &amp; Copy</button>
-      <button class="btn-ghost" id="togglePwBtn" onclick="toggleShowPassword()">👁 Show</button>
+    </div>
+    <div class="step-hidden" id="pwFieldRow" style="margin-top:8px;">
+      <input type="password" id="vmAdminPassword" readonly>
+      <div class="status-row">
+        <button class="btn-ghost" id="togglePwBtn" onclick="toggleShowPassword()">👁 Show</button>
+      </div>
     </div>
     <input type="password" id="encryptPassphrase" placeholder="Passphrase to protect the downloaded file (8+ chars)" style="margin-top:12px;">
     <div class="status-row">
@@ -584,6 +588,7 @@ async function generateAndCopyPassword() {
   const downloadWanted = document.getElementById('downloadEncCheckbox').checked;
 
   field.value = generateStrongPassword(16);
+  revealStep('pwFieldRow', false); // must be visible before select()/copy will work
   const copied = await copyFieldValue(field);
 
   let msg = copied ? '✅ Generated & copied to clipboard.' : '✅ Generated — could not auto-copy, select the field and copy manually.';
