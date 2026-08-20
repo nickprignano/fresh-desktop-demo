@@ -593,15 +593,31 @@ function toggleShowPassword() {
 
 // Copies the field's value to the clipboard and resolves true/false — never touches status text
 // itself, so callers can fold the result into one combined message.
+//
+// This field is type="password" (masked), and browsers deliberately refuse execCommand('copy')
+// on password fields — select()+copy silently returns false there even though it works fine on
+// type="text". navigator.clipboard.writeText() copies the string value directly (no DOM selection
+// involved), so it's unaffected by the field being masked — try that first. It still needs a
+// secure context (https/localhost), so fall back to the legacy select()+execCommand path (briefly
+// flipping the field to type="text" so the copy isn't blocked) for a plain http/file:// page.
 function copyFieldValue(field) {
+  if (window.isSecureContext && navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(field.value)
+      .then(function () { return true; })
+      .catch(function () { return legacyCopy(field); });
+  }
+  return Promise.resolve(legacyCopy(field));
+}
+
+function legacyCopy(field) {
+  const wasPassword = field.type === 'password';
+  if (wasPassword) field.type = 'text'; // execCommand('copy') is blocked on type="password"
+  field.focus();
   field.select();
   let copied = false;
   try { copied = document.execCommand('copy'); } catch (e) { copied = false; }
-  if (copied) return Promise.resolve(true);
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    return navigator.clipboard.writeText(field.value).then(function () { return true; }).catch(function () { return false; });
-  }
-  return Promise.resolve(false);
+  if (wasPassword) field.type = 'password'; // restore the mask immediately — no repaint in between
+  return copied;
 }
 
 // Single combined action: generate a fresh password, copy it to the clipboard, and optionally

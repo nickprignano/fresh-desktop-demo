@@ -317,8 +317,7 @@
           "modulesUrl": "https://wvdportalstorageblob.blob.core.windows.net/galleryartifacts/Configuration.zip",
           "configurationFunction": "Configuration.ps1\\AddSessionHost",
           "properties": {
-            "hostPoolName": "[variables('hostPoolName')]",
-            "aadJoin": true
+            "hostPoolName": "[variables('hostPoolName')]"
           }
         },
         "protectedSettings": {
