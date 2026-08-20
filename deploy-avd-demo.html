@@ -287,6 +287,58 @@
   .delivered-banner.show { display: block; }
   .est-note { font-size: 11px; color: var(--muted); margin-top: 10px; }
 
+  /* --- Progressive reveal: steps that aren't relevant yet stay out of the way --- */
+  .step-hidden { display: none !important; }
+  .card.just-revealed { animation: cardReveal 0.5s ease; }
+  @keyframes cardReveal {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* --- Live cost calculator --- */
+  .pizza-calc-track {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 4px;
+  }
+  .pizza-calc-btn {
+    flex: 1;
+    min-width: 140px;
+    text-align: center;
+    line-height: 1.5;
+    padding: 10px 12px;
+    font-size: 13px;
+    margin-top: 0;
+  }
+  .pizza-calc-btn.active {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+  }
+  .pizza-calc-sub {
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .pizza-calc-btn.active .pizza-calc-sub { color: rgba(255,255,255,0.85); }
+  .calc-numbers {
+    margin-top: 14px;
+    background: #141414;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .calc-hourly {
+    font-size: 22px;
+    font-weight: 800;
+    color: var(--accent);
+  }
+  .calc-line {
+    font-size: 13px;
+    color: var(--text);
+    margin-top: 4px;
+  }
+
   /* --- Presentation countdown --- */
   .preso-timer {
     position: fixed;
@@ -340,10 +392,10 @@
 </head>
 <body>
 <div class="preso-timer" id="presoTimer">
-  <div class="preso-timer-label">⏱ Presentation Clock</div>
+  <div class="preso-timer-label" id="presoTimerLabel">⏱ Starts when you deploy</div>
   <div class="preso-timer-value" id="presoTimerValue">30:00</div>
   <div class="preso-timer-controls">
-    <button class="btn-ghost" onclick="startPresoTimer()">Start</button>
+    <button class="btn-ghost" id="presoPauseBtn" onclick="togglePausePresoTimer()" disabled>Pause</button>
     <button class="btn-ghost" onclick="resetPresoTimer()">Reset</button>
   </div>
 </div>
@@ -354,23 +406,49 @@
   <p class="sub">One click deploys a native Azure Virtual Desktop environment&mdash;host pool, workspace, desktop app group, and one Microsoft&nbsp;Entra&#8209;joined Windows&nbsp;11 session host&mdash;and grants <em>you</em> access automatically. No domain controller, no manual RBAC. Order it, watch it bake, log in fresh.</p>
 
   <div class="card">
-    <h2><span class="step-num">1</span> Build your order &amp; deploy</h2>
-    <p>One click opens the Azure Portal's own deployment page&mdash;pre-loaded straight from the template's permanent home on GitHub, with real dropdowns for <strong>Pizza Size</strong> (VM size), <strong>Crust</strong> (Windows 11 image), and <strong>Toppings</strong> (session capacity + clipboard/drive redirection). Defaults are already picked, so Review + Create works with zero clicks&mdash;or change them live for the crowd.</p>
-    <button class="btn-primary" id="deployMainBtn" onclick="deployToAzure()">🚀 Deploy to Azure</button>
-    <p class="status-text" id="publishStatus" style="margin-top:10px;"></p>
+    <h2><span class="step-num">1</span> Get a VM admin password ready</h2>
+    <p class="muted" style="margin-bottom:6px;">The portal's Basics tab will ask for a local admin password for the session host. Generate one here first &mdash; it's typed straight into this field, never sent anywhere &mdash; then paste it into the portal in Step 2.</p>
+    <input type="text" id="vmAdminPassword" placeholder="Click Generate below" readonly>
+    <div class="status-row">
+      <button class="btn-ghost" onclick="generatePassword()">🎲 Generate</button>
+      <button class="btn-ghost" onclick="copyPassword()">📋 Copy</button>
+    </div>
+    <input type="password" id="encryptPassphrase" placeholder="Passphrase to protect the downloaded file (8+ chars)" style="margin-top:12px;">
+    <div class="status-row">
+      <button class="btn-ghost" onclick="downloadEncryptedPassword()">⬇ Download Encrypted File</button>
+    </div>
+    <p class="status-text" id="pwStatus" style="margin-top:8px;"></p>
   </div>
 
   <div class="card">
-    <h2><span class="step-num">2</span> Track your order</h2>
-    <p class="muted">Hit start the moment you click <strong>Create</strong> in the portal tab.</p>
+    <h2><span class="step-num">2</span> Build your order &amp; deploy</h2>
+    <p>One click opens the Azure Portal's own deployment page&mdash;pre-loaded straight from the template's permanent home on GitHub, with real dropdowns for <strong>Pizza Size</strong> (VM size), <strong>Crust</strong> (Windows 11 image), and <strong>Toppings</strong> (session capacity + clipboard/drive redirection). Defaults are already picked, so Review + Create works with zero clicks&mdash;or change them live for the crowd. Paste the password from Step 1 into the Basics tab when it asks.</p>
+    <button class="btn-primary" id="deployMainBtn" onclick="deployToAzure()">🚀 Deploy to Azure</button>
+    <p class="status-text" id="publishStatus" style="margin-top:10px;"></p>
+
+    <div style="margin-top:18px; padding-top:18px; border-top:1px solid var(--border);">
+      <p class="muted" style="margin-bottom:6px;">💰 Live menu pricing &mdash; pick the same Pizza Size you'll choose in the portal's Basics tab to see what it actually costs (compute + OS disk + networking) before you click Create.</p>
+      <div class="pizza-calc-track" id="calcSizeTrack"></div>
+      <div class="calc-numbers">
+        <div class="calc-hourly" id="calcHourly">Loading live Azure pricing&hellip;</div>
+        <div class="calc-line" id="calcDemo"></div>
+        <div class="calc-line" id="calcMonthly"></div>
+      </div>
+      <p class="muted" id="calcBreakdown" style="margin-top:8px; font-size:12px;"></p>
+      <p class="status-text" id="calcSourceNote" style="margin-top:8px;"></p>
+    </div>
+  </div>
+
+  <div class="card step-hidden" id="trackCard">
+    <h2><span class="step-num">3</span> Track your order</h2>
+    <p class="muted">Started automatically the moment you clicked Deploy. Nudge it if the real deployment in the portal tab runs ahead or behind.</p>
     <div class="tracker-controls">
-      <button class="btn-primary" id="startBtn" onclick="startTracker()" style="margin-top:0;">▶ Start tracking my order</button>
-      <button class="btn-ghost" onclick="resetTracker()">Reset</button>
-      <div class="speed-toggle">
+      <div class="speed-toggle" style="margin-left:0;">
         <span class="muted">Speed:</span>
         <button id="speed1" class="active" onclick="setSpeed(1)">1x (live)</button>
         <button id="speed8" onclick="setSpeed(8)">8x (rehearse)</button>
       </div>
+      <button class="btn-ghost" onclick="resetTracker()" style="margin-left:auto;">Reset</button>
     </div>
 
     <div class="stage-track" id="stageTrack">
@@ -381,7 +459,7 @@
     <div class="now-playing">
       <div>
         <div class="title" id="stageTitle">🧾 Order Placed</div>
-        <div class="blurb" id="stageBlurb">Click Start once you've hit Create in the portal.</div>
+        <div class="blurb" id="stageBlurb">Resource group, network, host pool, workspace &amp; app group going in.</div>
       </div>
       <div class="elapsed" id="elapsedTime">0:00</div>
     </div>
@@ -393,14 +471,14 @@
     </div>
   </div>
 
-  <div class="card">
-    <h2><span class="step-num">3</span> Log in to your Fresh Desktop</h2>
+  <div class="card step-hidden" id="loginCard">
+    <h2><span class="step-num">4</span> Log in to your Fresh Desktop</h2>
     <p>Sign in with the same Microsoft&nbsp;Entra account you deployed with&mdash;your desktop is already assigned, no extra setup.</p>
-    <a class="btn-deploy show" style="background:var(--accent); color:white;" href="https://client.wvd.microsoft.com/arm/webclient/" target="_blank">🖥️ Open AVD Web Client &rarr;</a>
+    <a class="btn-deploy show" id="openDesktopLink" style="background:var(--accent); color:white;" href="https://client.wvd.microsoft.com/arm/webclient/" target="_blank" onclick="onOpenDesktopClick()">🖥️ Open AVD Web Client &rarr;</a>
   </div>
 
-  <div class="card">
-    <h2><span class="step-num">4</span> Clean up when you're done</h2>
+  <div class="card step-hidden" id="cleanupCard">
+    <h2><span class="step-num">5</span> Clean up when you're done</h2>
     <p>This spins up a real VM that bills by the hour. Unlike GitHub's API, Azure's own sign-in and management endpoints don't allow a webpage to call them directly from the browser (no CORS) &mdash; so this can't be a single silent click the way Deploy is. This is the fastest real alternative: type the resource group name you used in the portal, click once, and both the command is on your clipboard <em>and</em> Cloud Shell is open ready to paste it into.</p>
     <input type="text" id="cleanupRgName" placeholder="Resource group name (whatever you typed in the portal's Basics tab)">
     <div class="status-row">
@@ -417,6 +495,22 @@
 // re-verify with `git remote show origin` or the repo's GitHub page if this was ever repointed).
 const RAW_TEMPLATE_URL = 'https://raw.githubusercontent.com/nickprignano/fresh-desktop-demo/main/azuredeploy.json';
 
+// ---- Progressive reveal: sections only show up once they're actually relevant ----
+function revealStep(id, scroll) {
+  const el = document.getElementById(id);
+  if (!el || !el.classList.contains('step-hidden')) return false;
+  el.classList.remove('step-hidden');
+  el.classList.add('just-revealed');
+  setTimeout(function () { el.classList.remove('just-revealed'); }, 500);
+  if (scroll !== false) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  return true;
+}
+
+function hideStep(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.add('step-hidden');
+}
+
 function deployToAzure() {
   const statusEl = document.getElementById('publishStatus');
   const deployUrl = 'https://portal.azure.com/#create/Microsoft.Template/uri/' + encodeURIComponent(RAW_TEMPLATE_URL);
@@ -424,12 +518,169 @@ function deployToAzure() {
   statusEl.innerHTML = '✅ Opening the Azure Portal… <a href="' + deployUrl + '" target="_blank" style="color:#7fffa0;">click here</a> if the new tab did not open.';
   statusEl.style.color = '#7fffa0';
   window.open(deployUrl, '_blank');
+
+  // Deploy is the real "the clock has started" moment — the order tracker and the presentation
+  // timer both kick off from here instead of needing their own separate manual Start button.
   startPresoTimer();
+  revealStep('trackCard');
+  startTracker();
 }
 
-// ---- Presentation countdown (30 min, auto-starts on deploy) ----
+// ---- VM admin password helper (generate / copy / encrypted download) ----
+function randInt(max) {
+  const arr = new Uint32Array(1);
+  crypto.getRandomValues(arr);
+  return arr[0] % max;
+}
+
+function generateStrongPassword(length) {
+  length = length || 16;
+  const sets = {
+    upper: 'ABCDEFGHJKLMNPQRSTUVWXYZ',   // no O/I — avoids on-stage misreads
+    lower: 'abcdefghijkmnpqrstuvwxyz',
+    digit: '23456789',
+    symbol: '!@#$%^&*-_=+'
+  };
+  const all = sets.upper + sets.lower + sets.digit + sets.symbol;
+  const chars = [sets.upper, sets.lower, sets.digit, sets.symbol].map(function (s) { return s[randInt(s.length)]; });
+  while (chars.length < length) chars.push(all[randInt(all.length)]);
+  for (let i = chars.length - 1; i > 0; i--) {
+    const j = randInt(i + 1);
+    const tmp = chars[i]; chars[i] = chars[j]; chars[j] = tmp;
+  }
+  return chars.join('');
+}
+
+function generatePassword() {
+  document.getElementById('vmAdminPassword').value = generateStrongPassword(16);
+  const statusEl = document.getElementById('pwStatus');
+  statusEl.textContent = '✅ Generated — meets Azure\'s 12+ char / 3-of-4 complexity rule.';
+  statusEl.style.color = '#7fffa0';
+}
+
+function copyPassword() {
+  const field = document.getElementById('vmAdminPassword');
+  const statusEl = document.getElementById('pwStatus');
+  if (!field.value) {
+    statusEl.textContent = '⚠ Generate a password first.';
+    statusEl.style.color = '#f87171';
+    return;
+  }
+  field.select();
+  let copied = false;
+  try { copied = document.execCommand('copy'); } catch (e) { copied = false; }
+  if (copied) {
+    statusEl.textContent = '✅ Copied to clipboard.';
+    statusEl.style.color = '#7fffa0';
+  } else if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(field.value).then(function () {
+      statusEl.textContent = '✅ Copied to clipboard.';
+      statusEl.style.color = '#7fffa0';
+    }).catch(function () {
+      statusEl.textContent = 'Could not auto-copy — select the field and copy manually.';
+      statusEl.style.color = '#f87171';
+    });
+  } else {
+    statusEl.textContent = 'Could not auto-copy — select the field and copy manually.';
+    statusEl.style.color = '#f87171';
+  }
+}
+
+function bufToB64(buf) {
+  return btoa(String.fromCharCode.apply(null, new Uint8Array(buf)));
+}
+
+async function encryptPassword(plaintext, passphrase) {
+  const enc = new TextEncoder();
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const baseKey = await crypto.subtle.importKey('raw', enc.encode(passphrase), 'PBKDF2', false, ['deriveKey']);
+  const key = await crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt: salt, iterations: 200000, hash: 'SHA-256' },
+    baseKey, { name: 'AES-GCM', length: 256 }, false, ['encrypt']
+  );
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, enc.encode(plaintext));
+  return { salt: bufToB64(salt), iv: bufToB64(iv), ciphertext: bufToB64(ciphertext) };
+}
+
+// Builds a small standalone HTML file that decrypts itself in-browser given the same passphrase —
+// no companion script to lose, nothing sent anywhere, matches this project's self-contained pattern.
+function buildDecryptHtml(salt, iv, ciphertext) {
+  const openScript = '<' + 'script>';
+  const closeScript = '<' + '/script>';
+  return '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Fresh Desktop — Encrypted VM Admin Password</title>' +
+    '<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#000;color:#f0f0f0;display:flex;justify-content:center;padding:60px 20px;}' +
+    '.card{background:#161616;border:1px solid #2e2e2e;border-radius:14px;padding:28px;max-width:420px;width:100%;}' +
+    'h1{font-size:18px;margin:0 0 12px;} input{width:100%;padding:12px;border-radius:8px;border:1px solid #2e2e2e;background:#141414;color:#f0f0f0;font-size:14px;margin-top:8px;box-sizing:border-box;}' +
+    'button{margin-top:14px;border:none;border-radius:10px;padding:12px 20px;background:#009246;color:#fff;font-weight:600;cursor:pointer;}' +
+    '.result{margin-top:16px;font-size:15px;word-break:break-all;} .err{color:#f87171;margin-top:10px;font-size:13px;}</style></head><body>' +
+    '<div class="card"><h1>🔒 Fresh Desktop — Encrypted VM Admin Password</h1>' +
+    '<p style="color:#9a9a9a;font-size:13px;">Enter the passphrase you set when this file was downloaded. Decryption happens entirely in this browser tab — nothing is sent anywhere.</p>' +
+    '<input type="password" id="pp" placeholder="Passphrase">' +
+    '<button onclick="go()">Decrypt</button>' +
+    '<div class="result" id="out"></div><div class="err" id="err"></div></div>' +
+    openScript +
+    'const SALT="' + salt + '", IV="' + iv + '", CT="' + ciphertext + '";' +
+    'function b64(s){return Uint8Array.from(atob(s), function(c){return c.charCodeAt(0);});}' +
+    'async function go(){' +
+    'document.getElementById("err").textContent="";document.getElementById("out").textContent="";' +
+    'try{' +
+    'const pass=document.getElementById("pp").value;' +
+    'const enc=new TextEncoder();' +
+    'const baseKey=await crypto.subtle.importKey("raw",enc.encode(pass),"PBKDF2",false,["deriveKey"]);' +
+    'const key=await crypto.subtle.deriveKey({name:"PBKDF2",salt:b64(SALT),iterations:200000,hash:"SHA-256"},baseKey,{name:"AES-GCM",length:256},false,["decrypt"]);' +
+    'const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv:b64(IV)},key,b64(CT));' +
+    'document.getElementById("out").textContent="Password: "+new TextDecoder().decode(pt);' +
+    '}catch(e){document.getElementById("err").textContent="Wrong passphrase, or file corrupted.";}' +
+    '}' +
+    closeScript +
+    '</body></html>';
+}
+
+async function downloadEncryptedPassword() {
+  const pwField = document.getElementById('vmAdminPassword');
+  const passField = document.getElementById('encryptPassphrase');
+  const statusEl = document.getElementById('pwStatus');
+  if (!pwField.value) {
+    statusEl.textContent = '⚠ Generate a password first.';
+    statusEl.style.color = '#f87171';
+    return;
+  }
+  if (!passField.value || passField.value.length < 8) {
+    statusEl.textContent = '⚠ Enter an 8+ character passphrase to protect the file.';
+    statusEl.style.color = '#f87171';
+    return;
+  }
+  try {
+    const enc = await encryptPassword(pwField.value, passField.value);
+    const html = buildDecryptHtml(enc.salt, enc.iv, enc.ciphertext);
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'fresh-desktop-vm-admin-password.enc.html';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    statusEl.textContent = '✅ Downloaded. Open that file later and enter the same passphrase to reveal the password — nothing leaves your browser either time.';
+    statusEl.style.color = '#7fffa0';
+  } catch (e) {
+    statusEl.textContent = '⚠ Encryption failed — try a different browser (needs Web Crypto support).';
+    statusEl.style.color = '#f87171';
+  }
+}
+
+// ---- Presentation clock ----
+// A small state machine instead of a plain countdown: idle (before Deploy) -> countdown (30:00 -> 0:00)
+// -> overtime (counts up in red past 0:00). Auto-starts on Deploy; Pause/Resume + Reset are the only
+// manual controls. Auto-pauses when you click through to the AVD web client, since the clock stops
+// mattering once you're live in the desktop.
 const PRESO_TOTAL_MS = 30 * 60 * 1000;
+let presoMode = 'idle'; // 'idle' | 'countdown' | 'overtime'
+let presoPaused = false;
 let presoRemainingMs = PRESO_TOTAL_MS;
+let presoOvertimeMs = 0;
 let presoTimerInterval = null;
 let presoLastTick = null;
 
@@ -441,37 +692,237 @@ function formatMMSS(ms) {
 }
 
 function renderPresoTimer() {
-  document.getElementById('presoTimerValue').textContent = formatMMSS(presoRemainingMs);
   const wrap = document.getElementById('presoTimer');
-  wrap.classList.toggle('warn', presoRemainingMs <= 15 * 60000 && presoRemainingMs > 5 * 60000);
-  wrap.classList.toggle('critical', presoRemainingMs <= 5 * 60000);
+  const labelEl = document.getElementById('presoTimerLabel');
+  const valueEl = document.getElementById('presoTimerValue');
+  const pauseBtn = document.getElementById('presoPauseBtn');
+
+  if (presoMode === 'idle') {
+    labelEl.textContent = '⏱ Starts when you deploy';
+    valueEl.textContent = formatMMSS(presoRemainingMs);
+  } else if (presoMode === 'countdown') {
+    labelEl.textContent = '⏱ Presentation Clock';
+    valueEl.textContent = formatMMSS(presoRemainingMs);
+  } else {
+    labelEl.textContent = '⏱ Overtime';
+    valueEl.textContent = '+' + formatMMSS(presoOvertimeMs);
+  }
+
+  wrap.classList.toggle('warn', presoMode === 'countdown' && presoRemainingMs <= 15 * 60000 && presoRemainingMs > 5 * 60000);
+  wrap.classList.toggle('critical', (presoMode === 'countdown' && presoRemainingMs <= 5 * 60000) || presoMode === 'overtime');
+
+  pauseBtn.disabled = presoMode === 'idle';
+  pauseBtn.textContent = presoPaused ? 'Resume' : 'Pause';
 }
 
 function presoTick() {
   const now = Date.now();
   const delta = now - presoLastTick;
   presoLastTick = now;
-  presoRemainingMs = Math.max(0, presoRemainingMs - delta);
-  renderPresoTimer();
-  if (presoRemainingMs <= 0 && presoTimerInterval) {
-    clearInterval(presoTimerInterval);
-    presoTimerInterval = null;
+
+  if (presoMode === 'countdown') {
+    presoRemainingMs -= delta;
+    if (presoRemainingMs <= 0) {
+      presoRemainingMs = 0;
+      presoMode = 'overtime';
+      presoOvertimeMs = 0;
+    }
+  } else if (presoMode === 'overtime') {
+    presoOvertimeMs += delta;
   }
+  renderPresoTimer();
 }
 
 function startPresoTimer() {
-  if (presoTimerInterval) return; // already running, don't restart on a second deploy click
+  if (presoMode !== 'idle') return; // already running/overtime — don't restart on a second Deploy click
+  presoMode = 'countdown';
+  presoPaused = false;
   presoLastTick = Date.now();
   presoTimerInterval = setInterval(presoTick, 250);
+  renderPresoTimer();
+}
+
+function togglePausePresoTimer() {
+  if (presoMode === 'idle') return;
+  if (presoPaused) {
+    presoPaused = false;
+    presoLastTick = Date.now();
+    presoTimerInterval = setInterval(presoTick, 250);
+  } else {
+    presoPaused = true;
+    if (presoTimerInterval) { clearInterval(presoTimerInterval); presoTimerInterval = null; }
+  }
+  renderPresoTimer();
+}
+
+// Auto-pause (doesn't fully stop/reset) once you've clicked through to the live desktop.
+function stopPresoTimer() {
+  if (presoTimerInterval) { clearInterval(presoTimerInterval); presoTimerInterval = null; }
+  presoPaused = true;
+  renderPresoTimer();
 }
 
 function resetPresoTimer() {
   if (presoTimerInterval) { clearInterval(presoTimerInterval); presoTimerInterval = null; }
+  presoMode = 'idle';
+  presoPaused = false;
   presoRemainingMs = PRESO_TOTAL_MS;
+  presoOvertimeMs = 0;
   renderPresoTimer();
 }
 
+function onOpenDesktopClick() {
+  stopPresoTimer();
+}
+
 renderPresoTimer();
+
+// ---- Live cost calculator ----
+// Static, single-file page with no backend (same constraint as Deploy/Cleanup above) — pricing is
+// fetched client-side straight from the public Azure Retail Prices API so it stays accurate without
+// manual updates. Falls back to a small hardcoded rate table if that call fails or is CORS/network-blocked.
+const PRICE_REGION = 'northcentralus';
+// Keys/labels mirror azuredeploy.json's pizzaSize allowedValues + vmSizeMap exactly.
+const PIZZA_VM_MAP = {
+  personal: { key: 'personal', label: '🍕 Personal Pan', sub: '2 vCPU / 8 GB', armSku: 'Standard_D2as_v5' },
+  family:   { key: 'family',   label: '🍕🍕 Family Size', sub: '4 vCPU / 16 GB', armSku: 'Standard_D4as_v5' },
+  party:    { key: 'party',    label: '🍕🍕🍕 Large Party', sub: '8 vCPU / 32 GB', armSku: 'Standard_D8as_v5' }
+};
+
+// Fallback-only rates, used if the live API call fails or is blocked. Approximate northcentralus
+// pay-as-you-go compute rates on the *non*-Windows meter — AVD doesn't bill a separate Windows license
+// on the session host; that's covered by the Microsoft 365 / AVD per-user access right. Re-verify at
+// https://prices.azure.com if the live fetch below ever needs a sanity check against these.
+const FALLBACK_COMPUTE_HOURLY = {
+  'Standard_D2as_v5': 0.086,
+  'Standard_D4as_v5': 0.172,
+  'Standard_D8as_v5': 0.344
+};
+const FALLBACK_DISK_MONTHLY = 9.60; // StandardSSD_LRS, E10 tier (128 GiB OS disk), approx northcentralus
+
+const priceState = {
+  source: 'pending', // 'live' | 'fallback'
+  computeHourly: {},  // armSkuName -> $/hr
+  diskMonthly: null,  // $/month for the OS disk tier
+  selected: 'personal'
+};
+
+function fetchWithTimeout(url, ms) {
+  const controller = new AbortController();
+  const timer = setTimeout(function () { controller.abort(); }, ms);
+  return fetch(url, { signal: controller.signal }).finally(function () { clearTimeout(timer); });
+}
+
+async function fetchAzurePricing() {
+  const skus = Object.keys(PIZZA_VM_MAP).map(function (k) { return PIZZA_VM_MAP[k].armSku; });
+  const skuOr = skus.map(function (s) { return "armSkuName eq '" + s + "'"; }).join(' or ');
+  const computeFilter = "armRegionName eq '" + PRICE_REGION + "' and priceType eq 'Consumption' and (" + skuOr + ")";
+  const diskFilter = "armRegionName eq '" + PRICE_REGION + "' and priceType eq 'Consumption' and serviceName eq 'Storage' and productName eq 'Standard SSD Managed Disks'";
+  const base = 'https://prices.azure.com/api/retail/prices?$filter=';
+
+  const [computeRes, diskRes] = await Promise.all([
+    fetchWithTimeout(base + encodeURIComponent(computeFilter), 7000).then(function (r) {
+      if (!r.ok) throw new Error('compute HTTP ' + r.status);
+      return r.json();
+    }),
+    fetchWithTimeout(base + encodeURIComponent(diskFilter), 7000).then(function (r) {
+      if (!r.ok) throw new Error('disk HTTP ' + r.status);
+      return r.json();
+    })
+  ]);
+
+  const computeHourly = {};
+  (computeRes.Items || []).forEach(function (item) {
+    if (!item.productName || /Windows/i.test(item.productName)) return; // no separate OS license meter for AVD
+    if (/Spot|Low Priority/i.test(item.meterName || '')) return;
+    if (item.unitOfMeasure !== '1 Hour') return;
+    if (skus.indexOf(item.armSkuName) !== -1) computeHourly[item.armSkuName] = item.retailPrice;
+  });
+  if (skus.some(function (s) { return typeof computeHourly[s] !== 'number'; })) {
+    throw new Error('Live response missing one or more SKU prices');
+  }
+
+  let diskMonthly = null;
+  (diskRes.Items || []).forEach(function (item) {
+    if (!item.meterName || /Snapshot/i.test(item.meterName)) return;
+    if (item.meterName.indexOf('E10') === 0) diskMonthly = item.retailPrice;
+  });
+  if (typeof diskMonthly !== 'number') throw new Error('Live response missing E10 disk price');
+
+  priceState.computeHourly = computeHourly;
+  priceState.diskMonthly = diskMonthly;
+  priceState.source = 'live';
+}
+
+function useFallbackPricing() {
+  priceState.computeHourly = Object.assign({}, FALLBACK_COMPUTE_HOURLY);
+  priceState.diskMonthly = FALLBACK_DISK_MONTHLY;
+  priceState.source = 'fallback';
+}
+
+function money(n, decimals) {
+  return '$' + n.toFixed(decimals == null ? 2 : decimals);
+}
+
+function renderPriceCalc() {
+  const sel = PIZZA_VM_MAP[priceState.selected];
+  const computeHr = priceState.computeHourly[sel.armSku] || 0;
+  const diskHr = (priceState.diskMonthly || 0) / 730; // blended hourly from the monthly disk rate
+  const networkHr = 0; // VNet + NIC with no public IP attached = no charge
+  const totalHr = computeHr + diskHr + networkHr;
+  const demoMinutes = 20;
+  const demoCost = totalHr * (demoMinutes / 60);
+  const monthlyCost = totalHr * 730;
+
+  document.querySelectorAll('.pizza-calc-btn').forEach(function (btn) {
+    btn.classList.toggle('active', btn.dataset.size === priceState.selected);
+  });
+
+  document.getElementById('calcHourly').textContent = money(totalHr, 3) + ' / hr';
+  document.getElementById('calcDemo').textContent = '≈ ' + money(demoCost, 2) + ' for a typical ~20 min demo';
+  document.getElementById('calcMonthly').textContent = '≈ ' + money(monthlyCost, 2) + ' / mo if left running 24/7';
+  document.getElementById('calcBreakdown').innerHTML =
+    'Compute (' + sel.armSku + ', ' + PRICE_REGION + '): ' + money(computeHr, 3) + '/hr &middot; ' +
+    'OS disk (StandardSSD_LRS): ' + money(diskHr, 4) + '/hr &middot; ' +
+    'Networking (VNet + NIC, no public IP): $0.000/hr';
+
+  const noteEl = document.getElementById('calcSourceNote');
+  if (priceState.source === 'live') {
+    noteEl.textContent = '✅ Live pricing pulled just now from the Azure Retail Prices API (' + PRICE_REGION + ').';
+    noteEl.style.color = '#7fffa0';
+  } else {
+    noteEl.textContent = '⚠ Live pricing unavailable (network/CORS-blocked) — showing estimated fallback rates. Actual cost may differ slightly.';
+    noteEl.style.color = '#e8b400';
+  }
+}
+
+function selectPizzaCalc(size) {
+  priceState.selected = size;
+  renderPriceCalc();
+}
+
+async function initPriceCalculator() {
+  const track = document.getElementById('calcSizeTrack');
+  Object.keys(PIZZA_VM_MAP).forEach(function (key) {
+    const p = PIZZA_VM_MAP[key];
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn-ghost pizza-calc-btn' + (p.key === priceState.selected ? ' active' : '');
+    btn.dataset.size = p.key;
+    btn.innerHTML = p.label + '<br><span class="pizza-calc-sub">' + p.sub + '</span>';
+    btn.onclick = function () { selectPizzaCalc(p.key); };
+    track.appendChild(btn);
+  });
+
+  try {
+    await fetchAzurePricing();
+  } catch (e) {
+    useFallbackPricing();
+  }
+  renderPriceCalc();
+}
+
+initPriceCalculator();
 
 // ---- Cleanup ----
 function copyCleanupCommand() {
@@ -577,7 +1028,12 @@ function render() {
 
   const delivered = elapsedMs >= TOTAL_MS;
   document.getElementById('deliveredBanner').classList.toggle('show', delivered);
-  if (delivered && timer) { clearInterval(timer); timer = null; }
+  if (delivered) {
+    if (timer) { clearInterval(timer); timer = null; }
+    // Log in + Cleanup aren't relevant until the order is actually delivered — reveal both together.
+    revealStep('loginCard');
+    revealStep('cleanupCard', false);
+  }
 }
 
 function tick() {
@@ -592,13 +1048,13 @@ function startTracker() {
   if (timer) return;
   lastTick = Date.now();
   timer = setInterval(tick, 200);
-  document.getElementById('startBtn').textContent = '⏸ Tracking…';
 }
 
 function resetTracker() {
   if (timer) { clearInterval(timer); timer = null; }
   elapsedMs = 0;
-  document.getElementById('startBtn').textContent = '▶ Start tracking my order';
+  hideStep('loginCard');
+  hideStep('cleanupCard');
   render();
 }
 
