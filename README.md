@@ -19,7 +19,7 @@ This is a demo/proof-of-concept template, not hardened for production use.
 
 **Option 1 — one click:** hit the **Deploy to Azure** button above. It opens the Azure Portal pre-loaded with this template; fill in a resource group, region, and admin credentials, then Review + Create.
 
-**Option 2 — the full demo experience:** open [`deploy-avd-demo.html`](./deploy-avd-demo.html) in a browser. It wraps the same deployment in a themed landing page with a live delivery tracker and a 30-minute presentation countdown, meant for showing this off live on stage.
+**Option 2 — the full demo experience:** open [`deploy-avd-demo.html`](./deploy-avd-demo.html) in a browser. It wraps the same deployment in a themed landing page with a live Azure cost calculator, an order tracker, and a presentation clock — steps reveal themselves as they become relevant, meant for showing this off live on stage.
 
 Full walkthrough, pre-flight checklist, and troubleshooting notes are in [`AVD-DEMO-RUNBOOK.md`](./AVD-DEMO-RUNBOOK.md).
 
