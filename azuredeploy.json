@@ -2,7 +2,7 @@
   "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
   "contentVersion": "1.0.0.0",
   "metadata": {
-    "description": "One-click demo: deploys a minimal native Azure Virtual Desktop environment (host pool, workspace, desktop application group, one Microsoft Entra-joined session host) and grants the person who deploys it access to log in immediately via the AVD web client. Demo/POC only \u2014 not hardened for production."
+    "description": "One-click demo: deploys a minimal native Azure Virtual Desktop environment (Personal host pool, workspace, desktop application group, one Microsoft Entra-joined single-session Windows 11 Enterprise session host, outbound internet via a NAT Gateway) and grants the person who deploys it access to log in immediately via the AVD web client. Demo/POC only \u2014 not hardened for production."
   },
   "parameters": {
     "namePrefix": {
@@ -47,25 +47,14 @@
     },
     "pizzaToppings": {
       "type": "string",
-      "defaultValue": "\ud83e\uddc0 Cheese (Windows 11 24H2, no apps)",
+      "defaultValue": "\ud83e\uddc0 Cheese (Windows 11 24H2 Enterprise)",
       "allowedValues": [
-        "\ud83e\uddc0 Cheese (Windows 11 24H2, no apps)",
-        "\ud83c\udf2d Sausage (Windows 11 24H2 + Microsoft 365 Apps)",
-        "\ud83c\udf55 Pepperoni (Windows 11 23H2 + Microsoft 365 Apps)"
+        "\ud83e\uddc0 Cheese (Windows 11 24H2 Enterprise)",
+        "\ud83c\udf2d Sausage (Windows 11 25H2 Enterprise, newest)",
+        "\ud83c\udf55 Pepperoni (Windows 11 23H2 Enterprise, older release)"
       ],
       "metadata": {
-        "description": "Desktop OS image. Sausage and Pepperoni both take a little longer to boot the first time (Microsoft 365 Apps preinstalled); Pepperoni uses the prior Windows 11 release."
-      }
-    },
-    "toppingExtraCheese": {
-      "type": "string",
-      "defaultValue": "Yes, extra cheese (higher session capacity)",
-      "allowedValues": [
-        "Yes, extra cheese (higher session capacity)",
-        "No thanks (default capacity)"
-      ],
-      "metadata": {
-        "description": "Raises the host pool's max concurrent session limit. Cosmetic for a 1-VM demo, but real."
+        "description": "Desktop OS image/version \u2014 single-session Windows 11 Enterprise (switched from multi-session AVD images 2026-08-20 to match the Personal host pool type). Note: unlike the prior multi-session images, there is no marketplace SKU with Microsoft 365 Apps preinstalled for single-session Enterprise under this publisher/offer (confirmed via Microsoft Learn) \u2014 toppings now represent OS version choice only. Install M365 Apps separately if needed; out of scope for MVP."
       }
     },
     "toppingPepperoni": {
@@ -105,6 +94,8 @@
     "subnetName": "default",
     "nicName": "[concat(parameters('namePrefix'), '-nic')]",
     "vmName": "[concat(parameters('namePrefix'), '-vm')]",
+    "natGatewayName": "[concat(parameters('namePrefix'), '-natgw')]",
+    "natPublicIPName": "[concat(parameters('namePrefix'), '-natgw-pip')]",
     "addressPrefix": "10.20.0.0/24",
     "subnetPrefix": "10.20.0.0/24",
     "registrationTokenExpiration": "[dateTimeAdd(parameters('utcValue'), 'PT4H')]",
@@ -116,13 +107,9 @@
       "\ud83c\udf55\ud83c\udf55\ud83c\udf55 Large Party (8 vCPU / 32 GB)": "Standard_D8as_v5"
     },
     "imageSkuMap": {
-      "\ud83e\uddc0 Cheese (Windows 11 24H2, no apps)": "win11-24h2-avd",
-      "\ud83c\udf2d Sausage (Windows 11 24H2 + Microsoft 365 Apps)": "win11-24h2-avd-m365",
-      "\ud83c\udf55 Pepperoni (Windows 11 23H2 + Microsoft 365 Apps)": "win11-23h2-avd-m365"
-    },
-    "sessionLimitMap": {
-      "Yes, extra cheese (higher session capacity)": 10,
-      "No thanks (default capacity)": 5
+      "\ud83e\uddc0 Cheese (Windows 11 24H2 Enterprise)": "win11-24h2-ent",
+      "\ud83c\udf2d Sausage (Windows 11 25H2 Enterprise, newest)": "win11-25h2-ent",
+      "\ud83c\udf55 Pepperoni (Windows 11 23H2 Enterprise, older release)": "win11-23h2-ent"
     },
     "rdpPropertyMap": {
       "Yes, pepperoni (clipboard + drive redirection on)": "drivestoredirect:s:*;redirectclipboard:i:1;",
@@ -144,17 +131,50 @@
     },
     "vmSize": "[variables('vmSizeMap')[parameters('pizzaSize')]]",
     "imageSku": "[variables('imageSkuMap')[parameters('pizzaToppings')]]",
-    "maxSessionLimit": "[variables('sessionLimitMap')[parameters('toppingExtraCheese')]]",
-    "customRdpProperty": "[variables('rdpPropertyMap')[parameters('toppingPepperoni')]]",
+    "customRdpProperty": "[concat(variables('rdpPropertyMap')[parameters('toppingPepperoni')], 'enablerdsaadauth:i:1;')]",
     "diskStorageType": "[variables('diskTierMap')[parameters('pizzaCrust')].storageType]",
     "diskSizeGB": "[variables('diskTierMap')[parameters('pizzaCrust')].sizeGB]"
   },
   "resources": [
     {
+      "type": "Microsoft.Network/publicIPAddresses",
+      "apiVersion": "2023-09-01",
+      "name": "[variables('natPublicIPName')]",
+      "location": "[parameters('location')]",
+      "sku": {
+        "name": "Standard"
+      },
+      "properties": {
+        "publicIPAllocationMethod": "Static"
+      }
+    },
+    {
+      "type": "Microsoft.Network/natGateways",
+      "apiVersion": "2023-09-01",
+      "name": "[variables('natGatewayName')]",
+      "location": "[parameters('location')]",
+      "sku": {
+        "name": "Standard"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/publicIPAddresses', variables('natPublicIPName'))]"
+      ],
+      "properties": {
+        "publicIpAddresses": [
+          {
+            "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('natPublicIPName'))]"
+          }
+        ]
+      }
+    },
+    {
       "type": "Microsoft.Network/virtualNetworks",
       "apiVersion": "2023-09-01",
       "name": "[variables('vnetName')]",
       "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/natGateways', variables('natGatewayName'))]"
+      ],
       "properties": {
         "addressSpace": {
           "addressPrefixes": [
@@ -165,7 +185,10 @@
           {
             "name": "[variables('subnetName')]",
             "properties": {
-              "addressPrefix": "[variables('subnetPrefix')]"
+              "addressPrefix": "[variables('subnetPrefix')]",
+              "natGateway": {
+                "id": "[resourceId('Microsoft.Network/natGateways', variables('natGatewayName'))]"
+              }
             }
           }
         ]
@@ -199,10 +222,10 @@
       "name": "[variables('hostPoolName')]",
       "location": "[parameters('location')]",
       "properties": {
-        "hostPoolType": "Pooled",
-        "loadBalancerType": "BreadthFirst",
+        "hostPoolType": "Personal",
+        "personalDesktopAssignmentType": "Automatic",
+        "loadBalancerType": "Persistent",
         "preferredAppGroupType": "Desktop",
-        "maxSessionLimit": "[variables('maxSessionLimit')]",
         "customRdpProperty": "[variables('customRdpProperty')]",
         "startVMOnConnect": true,
         "validationEnvironment": false,
@@ -302,6 +325,28 @@
     {
       "type": "Microsoft.Compute/virtualMachines/extensions",
       "apiVersion": "2023-09-01",
+      "name": "[concat(variables('vmName'), '/OfficeAppsInstall')]",
+      "location": "[parameters('location')]",
+      "condition": "[equals(parameters('pizzaToppings'), '🌭 Sausage (Windows 11 25H2 Enterprise, newest)')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Compute/virtualMachines', variables('vmName'))]"
+      ],
+      "properties": {
+        "publisher": "Microsoft.Compute",
+        "type": "CustomScriptExtension",
+        "typeHandlerVersion": "1.10",
+        "autoUpgradeMinorVersion": true,
+        "settings": {
+          "fileUris": [
+            "https://raw.githubusercontent.com/nickprignano/fresh-desktop-demo/main/office-apps-install.ps1"
+          ],
+          "commandToExecute": "powershell.exe -NonInteractive -ExecutionPolicy Bypass -File office-apps-install.ps1"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Compute/virtualMachines/extensions",
+      "apiVersion": "2023-09-01",
       "name": "[concat(variables('vmName'), '/AVDAgentDSC')]",
       "location": "[parameters('location')]",
       "dependsOn": [
@@ -394,7 +439,7 @@
     },
     "orderSummary": {
       "type": "string",
-      "value": "[concat('Order: ', parameters('pizzaSize'), ' | ', parameters('pizzaCrust'), ' | ', parameters('pizzaToppings'), ' | ', parameters('toppingExtraCheese'), ' | ', parameters('toppingPepperoni'))]"
+      "value": "[concat('Order: ', parameters('pizzaSize'), ' | ', parameters('pizzaCrust'), ' | ', parameters('pizzaToppings'), ' | ', parameters('toppingPepperoni'))]"
     }
   }
 }
