@@ -352,6 +352,13 @@
     z-index: 100;
     box-shadow: 0 6px 24px rgba(0,0,0,0.6);
     min-width: 132px;
+    max-width: 190px;
+  }
+  .preso-timer-sub {
+    font-size: 10px;
+    color: var(--muted);
+    margin-top: 4px;
+    line-height: 1.3;
   }
   .preso-timer-label {
     font-size: 10px;
@@ -386,17 +393,25 @@
       position: static;
       margin-bottom: 16px;
       min-width: 0;
+      max-width: none;
     }
   }
 </style>
 </head>
 <body>
 <div class="preso-timer" id="presoTimer">
-  <div class="preso-timer-label" id="presoTimerLabel">⏱ Starts when you deploy</div>
-  <div class="preso-timer-value" id="presoTimerValue">30:00</div>
-  <div class="preso-timer-controls">
-    <button class="btn-ghost" id="presoPauseBtn" onclick="togglePausePresoTimer()" disabled>Pause</button>
-    <button class="btn-ghost" onclick="resetPresoTimer()">Reset</button>
+  <div id="priceBadgeView">
+    <div class="preso-timer-label">💰 Building your order</div>
+    <div class="preso-timer-value" id="priceBadgeValue" style="font-size:22px;">&hellip;</div>
+    <div class="preso-timer-sub" id="priceBadgeSub"></div>
+  </div>
+  <div id="timerBadgeView" style="display:none;">
+    <div class="preso-timer-label" id="presoTimerLabel">⏱ Starts when you deploy</div>
+    <div class="preso-timer-value" id="presoTimerValue">30:00</div>
+    <div class="preso-timer-controls">
+      <button class="btn-ghost" id="presoPauseBtn" onclick="togglePausePresoTimer()" disabled>Pause</button>
+      <button class="btn-ghost" onclick="resetPresoTimer()">Reset</button>
+    </div>
   </div>
 </div>
 <div class="wrap">
@@ -405,25 +420,25 @@
   <div class="brand">🍕 Fresh Desktop <span class="tag">🇮🇹 made fresh to order</span></div>
   <p class="sub">One click deploys a native Azure Virtual Desktop environment&mdash;host pool, workspace, desktop app group, and one Microsoft&nbsp;Entra&#8209;joined Windows&nbsp;11 session host&mdash;and grants <em>you</em> access automatically. No domain controller, no manual RBAC. Order it, watch it bake, log in fresh.</p>
 
-  <div class="card">
+  <div class="card" id="sizeCard">
     <h2><span class="step-num">1</span> Pick your Pizza Size</h2>
     <p class="muted" style="margin-bottom:6px;">Sets the session host's VM size &mdash; match it in the Portal's Basics tab in Step 4.</p>
     <div class="pizza-calc-track" id="calcSizeTrack"></div>
   </div>
 
-  <div class="card">
-    <h2><span class="step-num">2</span> Pick your Sauce (disk tier)</h2>
+  <div class="card step-hidden" id="crustCard">
+    <h2><span class="step-num">2</span> Pick your Crust (disk tier)</h2>
     <p class="muted" style="margin-bottom:6px;">Sets the OS disk tier &mdash; doesn't change deploy time, just cost and in-session disk speed.</p>
-    <div class="pizza-calc-track" id="calcSauceTrack"></div>
-  </div>
-
-  <div class="card">
-    <h2><span class="step-num">3</span> Pick your Crust (image)</h2>
-    <p class="muted" style="margin-bottom:6px;">Sets the Windows 11 desktop image &mdash; Stuffed Crust just takes a little longer to boot the first time.</p>
     <div class="pizza-calc-track" id="calcCrustTrack"></div>
   </div>
 
-  <div class="card" id="deployCard">
+  <div class="card step-hidden" id="toppingCard">
+    <h2><span class="step-num">3</span> Pick your Toppings (image)</h2>
+    <p class="muted" style="margin-bottom:6px;">Sets the Windows 11 desktop image &mdash; Sausage and Pepperoni both take a little longer to boot the first time (Microsoft 365 Apps preinstalled).</p>
+    <div class="pizza-calc-track" id="calcToppingTrack"></div>
+  </div>
+
+  <div class="card step-hidden" id="deployCard">
     <h2><span class="step-num">4</span> Get your password ready &amp; deploy</h2>
     <p class="muted" style="margin-bottom:6px;">Generate a local admin password, then deploy &mdash; match your picks above in the Portal's Basics tab when it opens.</p>
 
@@ -770,8 +785,19 @@ function presoTick() {
   renderPresoTimer();
 }
 
+// One-way swap: the top-right badge shows the live price total while you're still picking your
+// order (steps 1-3), then permanently flips to the presentation timer the moment you deploy —
+// never reverts, since once a real deployment has started the timer is what matters on stage.
+function showTimerBadge() {
+  const priceView = document.getElementById('priceBadgeView');
+  const timerView = document.getElementById('timerBadgeView');
+  if (priceView) priceView.style.display = 'none';
+  if (timerView) timerView.style.display = '';
+}
+
 function startPresoTimer() {
   if (presoMode !== 'idle') return; // already running/overtime — don't restart on a second Deploy click
+  showTimerBadge();
   presoMode = 'countdown';
   presoPaused = false;
   presoLastTick = Date.now();
@@ -818,7 +844,8 @@ renderPresoTimer();
 // Static, single-file page with no backend (same constraint as Deploy/Cleanup above) — pricing is
 // fetched client-side straight from the public Azure Retail Prices API so it stays accurate without
 // manual updates. Falls back to a small hardcoded rate table if that call fails or is CORS/network-blocked.
-// Feeds Steps 1-3's selector tracks (Pizza Size / Sauce / Crust) and renders the combined total in Step 4.
+// Feeds Steps 1-3's selector tracks (Pizza Size / Crust / Toppings), renders the combined total in Step 4,
+// and mirrors into the top-right badge (replaced by the presentation timer once Deploy is clicked).
 const PRICE_REGION = 'northcentralus';
 // Keys/labels mirror azuredeploy.json's pizzaSize allowedValues + vmSizeMap exactly.
 const PIZZA_VM_MAP = {
@@ -826,17 +853,18 @@ const PIZZA_VM_MAP = {
   family:   { key: 'family',   label: '🍕🍕 Family Size', sub: '4 vCPU / 16 GB', armSku: 'Standard_D4as_v5' },
   party:    { key: 'party',    label: '🍕🍕🍕 Large Party', sub: '8 vCPU / 32 GB', armSku: 'Standard_D8as_v5' }
 };
-// Mirrors azuredeploy.json's toppingSauce allowedValues + diskTierMap exactly.
-const SAUCE_MAP = {
-  regular: { key: 'regular', label: '🍅🍅 Regular Sauce', sub: 'Standard SSD (default)', armDiskType: 'StandardSSD_LRS', diskSizeGB: 128, meterPrefix: 'E10' },
-  light:   { key: 'light',   label: '🍅 Light Sauce', sub: 'Standard HDD, cheaper', armDiskType: 'Standard_LRS', diskSizeGB: 128, meterPrefix: 'S10' },
-  extra:   { key: 'extra',   label: '🍅🍅🍅 Extra Sauce', sub: 'Premium SSD, fastest', armDiskType: 'Premium_LRS', diskSizeGB: 256, meterPrefix: 'P15' }
-};
-// Mirrors azuredeploy.json's pizzaCrust allowedValues exactly. Doesn't affect price — display/order-summary only.
+// Mirrors azuredeploy.json's pizzaCrust allowedValues + diskTierMap exactly. This is the OS disk tier.
 const CRUST_MAP = {
-  classic: { key: 'classic', label: '🍞 Classic Crust', sub: 'Windows 11 24H2' },
-  thin:    { key: 'thin',    label: '🫓 Thin Crust', sub: 'Windows 11 23H2' },
-  stuffed: { key: 'stuffed', label: '🧀 Stuffed Crust', sub: '24H2 + M365 Apps' }
+  thin:     { key: 'thin',     label: '🍞 Thin Crust', sub: 'Standard HDD, cheaper', armDiskType: 'Standard_LRS', diskSizeGB: 128, meterPrefix: 'S10' },
+  stuffed:  { key: 'stuffed',  label: '🧀 Stuffed Crust', sub: 'Standard SSD (default)', armDiskType: 'StandardSSD_LRS', diskSizeGB: 128, meterPrefix: 'E10' },
+  deepdish: { key: 'deepdish', label: '🍕 Deep Dish', sub: 'Premium SSD, fastest', armDiskType: 'Premium_LRS', diskSizeGB: 256, meterPrefix: 'P15' }
+};
+// Mirrors azuredeploy.json's pizzaToppings allowedValues exactly. This is the Windows 11 image.
+// Doesn't affect price — display/order-summary only.
+const TOPPING_MAP = {
+  cheese:    { key: 'cheese',    label: '🧀 Cheese', sub: 'Windows 11 24H2, no apps' },
+  sausage:   { key: 'sausage',   label: '🌭 Sausage', sub: '24H2 + Microsoft 365 Apps' },
+  pepperoni: { key: 'pepperoni', label: '🍕 Pepperoni', sub: '23H2 + Microsoft 365 Apps' }
 };
 
 // Fallback-only rates, used if the live API call fails or is blocked. Approximate northcentralus
@@ -848,23 +876,23 @@ const FALLBACK_COMPUTE_HOURLY = {
   'Standard_D4as_v5': 0.172,
   'Standard_D8as_v5': 0.344
 };
-// Fallback-only $/month per Sauce tier. "regular" (StandardSSD_LRS E10, 128 GiB) was spot-checked
-// against northcentralus retail pricing; "light" (Standard_LRS S10) and "extra" (Premium_LRS P15,
+// Fallback-only $/month per Crust (disk) tier. "stuffed" (StandardSSD_LRS E10, 128 GiB) was spot-checked
+// against northcentralus retail pricing; "thin" (Standard_LRS S10) and "deepdish" (Premium_LRS P15,
 // 256 GiB) are best-effort estimates only, not live-verified — re-check at https://prices.azure.com
 // before relying on them for anything beyond a rough demo number.
 const FALLBACK_DISK_MONTHLY = {
-  regular: 9.60,
-  light: 4.91,
-  extra: 38.02
+  thin: 4.91,
+  stuffed: 9.60,
+  deepdish: 38.02
 };
 
 const priceState = {
   source: 'pending', // 'live' | 'fallback'
   computeHourly: {},       // armSkuName -> $/hr
-  diskMonthlyBySauce: {},  // sauce key -> $/month
+  diskMonthlyByCrust: {},  // crust (disk tier) key -> $/month
   selectedSize: 'personal',
-  selectedSauce: 'regular',
-  selectedCrust: 'classic'
+  selectedCrust: 'stuffed',
+  selectedTopping: 'cheese'
 };
 
 function fetchWithTimeout(url, ms) {
@@ -902,27 +930,27 @@ async function fetchAzurePricing() {
     throw new Error('Live response missing one or more SKU prices');
   }
 
-  const diskMonthlyBySauce = {};
-  const sauceKeys = Object.keys(SAUCE_MAP);
+  const diskMonthlyByCrust = {};
+  const crustKeys = Object.keys(CRUST_MAP);
   (diskRes.Items || []).forEach(function (item) {
     if (!item.meterName || /Snapshot/i.test(item.meterName)) return;
-    sauceKeys.forEach(function (sk) {
-      if (diskMonthlyBySauce[sk] != null) return; // first match wins
-      if (item.meterName.indexOf(SAUCE_MAP[sk].meterPrefix) === 0) diskMonthlyBySauce[sk] = item.retailPrice;
+    crustKeys.forEach(function (ck) {
+      if (diskMonthlyByCrust[ck] != null) return; // first match wins
+      if (item.meterName.indexOf(CRUST_MAP[ck].meterPrefix) === 0) diskMonthlyByCrust[ck] = item.retailPrice;
     });
   });
-  if (sauceKeys.some(function (sk) { return typeof diskMonthlyBySauce[sk] !== 'number'; })) {
+  if (crustKeys.some(function (ck) { return typeof diskMonthlyByCrust[ck] !== 'number'; })) {
     throw new Error('Live response missing one or more disk tier prices');
   }
 
   priceState.computeHourly = computeHourly;
-  priceState.diskMonthlyBySauce = diskMonthlyBySauce;
+  priceState.diskMonthlyByCrust = diskMonthlyByCrust;
   priceState.source = 'live';
 }
 
 function useFallbackPricing() {
   priceState.computeHourly = Object.assign({}, FALLBACK_COMPUTE_HOURLY);
-  priceState.diskMonthlyBySauce = Object.assign({}, FALLBACK_DISK_MONTHLY);
+  priceState.diskMonthlyByCrust = Object.assign({}, FALLBACK_DISK_MONTHLY);
   priceState.source = 'fallback';
 }
 
@@ -932,10 +960,10 @@ function money(n, decimals) {
 
 function renderPriceCalc() {
   const sizeSel = PIZZA_VM_MAP[priceState.selectedSize];
-  const sauceSel = SAUCE_MAP[priceState.selectedSauce];
   const crustSel = CRUST_MAP[priceState.selectedCrust];
+  const toppingSel = TOPPING_MAP[priceState.selectedTopping];
   const computeHr = priceState.computeHourly[sizeSel.armSku] || 0;
-  const diskHr = (priceState.diskMonthlyBySauce[priceState.selectedSauce] || 0) / 730; // blended hourly from the monthly disk rate
+  const diskHr = (priceState.diskMonthlyByCrust[priceState.selectedCrust] || 0) / 730; // blended hourly from the monthly disk rate
   const networkHr = 0; // VNet + NIC with no public IP attached = no charge
   const totalHr = computeHr + diskHr + networkHr;
   const demoMinutes = 20;
@@ -945,11 +973,11 @@ function renderPriceCalc() {
   document.querySelectorAll('#calcSizeTrack .pizza-calc-btn').forEach(function (btn) {
     btn.classList.toggle('active', btn.dataset.key === priceState.selectedSize);
   });
-  document.querySelectorAll('#calcSauceTrack .pizza-calc-btn').forEach(function (btn) {
-    btn.classList.toggle('active', btn.dataset.key === priceState.selectedSauce);
-  });
   document.querySelectorAll('#calcCrustTrack .pizza-calc-btn').forEach(function (btn) {
     btn.classList.toggle('active', btn.dataset.key === priceState.selectedCrust);
+  });
+  document.querySelectorAll('#calcToppingTrack .pizza-calc-btn').forEach(function (btn) {
+    btn.classList.toggle('active', btn.dataset.key === priceState.selectedTopping);
   });
 
   document.getElementById('calcHourly').textContent = money(totalHr, 3) + ' / hr';
@@ -957,13 +985,19 @@ function renderPriceCalc() {
   document.getElementById('calcMonthly').textContent = '≈ ' + money(monthlyCost, 2) + ' / mo if left running 24/7';
   document.getElementById('calcBreakdown').innerHTML =
     'Compute (' + sizeSel.armSku + ', ' + PRICE_REGION + '): ' + money(computeHr, 3) + '/hr &middot; ' +
-    'OS disk (' + sauceSel.armDiskType + '): ' + money(diskHr, 4) + '/hr &middot; ' +
+    'OS disk (' + crustSel.armDiskType + '): ' + money(diskHr, 4) + '/hr &middot; ' +
     'Networking (VNet + NIC, no public IP): $0.000/hr';
 
+  const orderSummaryText = sizeSel.label.replace(/^\S+\s*/, '') + ' · ' + crustSel.label.replace(/^\S+\s*/, '') + ' · ' + toppingSel.label.replace(/^\S+\s*/, '');
   const orderEl = document.getElementById('orderSummaryLine');
-  if (orderEl) {
-    orderEl.textContent = 'Your order: ' + sizeSel.label.replace(/^\S+\s*/, '') + ' · ' + sauceSel.label.replace(/^\S+\s*/, '') + ' · ' + crustSel.label.replace(/^\S+\s*/, '') + ' — match these in the Portal\'s Basics tab.';
-  }
+  if (orderEl) orderEl.textContent = 'Your order: ' + orderSummaryText + ' — match these in the Portal\'s Basics tab.';
+
+  // Mirror the headline number into the top-right badge while it's still in "building" mode
+  // (see showTimerBadge(), called once from startPresoTimer() — one-way swap, never reverts).
+  const badgeValueEl = document.getElementById('priceBadgeValue');
+  if (badgeValueEl) badgeValueEl.textContent = money(totalHr, 3) + '/hr';
+  const badgeSubEl = document.getElementById('priceBadgeSub');
+  if (badgeSubEl) badgeSubEl.textContent = orderSummaryText;
 
   const noteEl = document.getElementById('calcSourceNote');
   if (priceState.source === 'live') {
@@ -975,10 +1009,11 @@ function renderPriceCalc() {
   }
 }
 
+// Each selection also reveals the next step's card — steps stay hidden until you actually reach them.
 function selectCalc(group, key) {
-  if (group === 'size') priceState.selectedSize = key;
-  else if (group === 'sauce') priceState.selectedSauce = key;
-  else if (group === 'crust') priceState.selectedCrust = key;
+  if (group === 'size') { priceState.selectedSize = key; revealStep('crustCard'); }
+  else if (group === 'crust') { priceState.selectedCrust = key; revealStep('toppingCard'); }
+  else if (group === 'topping') { priceState.selectedTopping = key; revealStep('deployCard'); }
   renderPriceCalc();
 }
 
@@ -998,8 +1033,8 @@ function buildCalcTrack(trackId, map, group, selectedKey) {
 
 async function initPriceCalculator() {
   buildCalcTrack('calcSizeTrack', PIZZA_VM_MAP, 'size', priceState.selectedSize);
-  buildCalcTrack('calcSauceTrack', SAUCE_MAP, 'sauce', priceState.selectedSauce);
   buildCalcTrack('calcCrustTrack', CRUST_MAP, 'crust', priceState.selectedCrust);
+  buildCalcTrack('calcToppingTrack', TOPPING_MAP, 'topping', priceState.selectedTopping);
 
   try {
     await fetchAzurePricing();

@@ -35,26 +35,26 @@
     },
     "pizzaCrust": {
       "type": "string",
-      "defaultValue": "Classic Crust (Windows 11 24H2, no apps)",
+      "defaultValue": "🧀 Stuffed Crust (Standard SSD disk — balanced, default)",
       "allowedValues": [
-        "Classic Crust (Windows 11 24H2, no apps)",
-        "Thin Crust (Windows 11 23H2, no apps)",
-        "Stuffed Crust (Windows 11 24H2 + Microsoft 365 Apps)"
+        "🧀 Stuffed Crust (Standard SSD disk — balanced, default)",
+        "🍞 Thin Crust (Standard HDD disk — cheapest, slower)",
+        "🍕 Deep Dish (Premium SSD disk — fastest, priciest)"
       ],
       "metadata": {
-        "description": "Desktop OS image. Thin Crust is the prior Windows 11 release (lighter, marginally faster first boot). Stuffed Crust takes a little longer to boot the first time (M365 Apps preinstalled)."
+        "description": "OS disk tier for the session host (Chicago-style naming: Deep Dish is the good one). Doesn't change deploy time — just cost and in-session disk performance."
       }
     },
-    "toppingSauce": {
+    "pizzaToppings": {
       "type": "string",
-      "defaultValue": "🍅🍅 Regular Sauce (Standard SSD disk — balanced, default)",
+      "defaultValue": "🧀 Cheese (Windows 11 24H2, no apps)",
       "allowedValues": [
-        "🍅🍅 Regular Sauce (Standard SSD disk — balanced, default)",
-        "🍅 Light Sauce (Standard HDD disk — cheapest, slower)",
-        "🍅🍅🍅 Extra Sauce (Premium SSD disk — fastest, priciest)"
+        "🧀 Cheese (Windows 11 24H2, no apps)",
+        "🌭 Sausage (Windows 11 24H2 + Microsoft 365 Apps)",
+        "🍕 Pepperoni (Windows 11 23H2 + Microsoft 365 Apps)"
       ],
       "metadata": {
-        "description": "OS disk tier for the session host. Doesn't change deploy time — just cost and in-session disk performance."
+        "description": "Desktop OS image. Sausage and Pepperoni both take a little longer to boot the first time (Microsoft 365 Apps preinstalled); Pepperoni uses the prior Windows 11 release."
       }
     },
     "toppingExtraCheese": {
@@ -116,9 +116,9 @@
       "🍕🍕🍕 Large Party (8 vCPU / 32 GB)": "Standard_D8as_v5"
     },
     "imageSkuMap": {
-      "Classic Crust (Windows 11 24H2, no apps)": "win11-24h2-avd",
-      "Thin Crust (Windows 11 23H2, no apps)": "win11-23h2-avd",
-      "Stuffed Crust (Windows 11 24H2 + Microsoft 365 Apps)": "win11-24h2-avd-m365"
+      "🧀 Cheese (Windows 11 24H2, no apps)": "win11-24h2-avd",
+      "🌭 Sausage (Windows 11 24H2 + Microsoft 365 Apps)": "win11-24h2-avd-m365",
+      "🍕 Pepperoni (Windows 11 23H2 + Microsoft 365 Apps)": "win11-23h2-avd-m365"
     },
     "sessionLimitMap": {
       "Yes, extra cheese (higher session capacity)": 10,
@@ -129,16 +129,16 @@
       "No thanks (locked down session)": ""
     },
     "diskTierMap": {
-      "🍅🍅 Regular Sauce (Standard SSD disk — balanced, default)": { "storageType": "StandardSSD_LRS", "sizeGB": 128 },
-      "🍅 Light Sauce (Standard HDD disk — cheapest, slower)": { "storageType": "Standard_LRS", "sizeGB": 128 },
-      "🍅🍅🍅 Extra Sauce (Premium SSD disk — fastest, priciest)": { "storageType": "Premium_LRS", "sizeGB": 256 }
+      "🧀 Stuffed Crust (Standard SSD disk — balanced, default)": { "storageType": "StandardSSD_LRS", "sizeGB": 128 },
+      "🍞 Thin Crust (Standard HDD disk — cheapest, slower)": { "storageType": "Standard_LRS", "sizeGB": 128 },
+      "🍕 Deep Dish (Premium SSD disk — fastest, priciest)": { "storageType": "Premium_LRS", "sizeGB": 256 }
     },
     "vmSize": "[variables('vmSizeMap')[parameters('pizzaSize')]]",
-    "imageSku": "[variables('imageSkuMap')[parameters('pizzaCrust')]]",
+    "imageSku": "[variables('imageSkuMap')[parameters('pizzaToppings')]]",
     "maxSessionLimit": "[variables('sessionLimitMap')[parameters('toppingExtraCheese')]]",
     "customRdpProperty": "[variables('rdpPropertyMap')[parameters('toppingPepperoni')]]",
-    "diskStorageType": "[variables('diskTierMap')[parameters('toppingSauce')].storageType]",
-    "diskSizeGB": "[variables('diskTierMap')[parameters('toppingSauce')].sizeGB]"
+    "diskStorageType": "[variables('diskTierMap')[parameters('pizzaCrust')].storageType]",
+    "diskSizeGB": "[variables('diskTierMap')[parameters('pizzaCrust')].sizeGB]"
   },
   "resources": [
     {
@@ -383,7 +383,7 @@
     },
     "orderSummary": {
       "type": "string",
-      "value": "[concat('Order: ', parameters('pizzaSize'), ' | ', parameters('pizzaCrust'), ' | ', parameters('toppingExtraCheese'), ' | ', parameters('toppingPepperoni'), ' | ', parameters('toppingSauce'))]"
+      "value": "[concat('Order: ', parameters('pizzaSize'), ' | ', parameters('pizzaCrust'), ' | ', parameters('pizzaToppings'), ' | ', parameters('toppingExtraCheese'), ' | ', parameters('toppingPepperoni'))]"
     }
   }
 }
