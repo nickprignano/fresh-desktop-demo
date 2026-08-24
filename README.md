@@ -2,7 +2,7 @@
 
 A one-click Azure Virtual Desktop demo. Click a button, get a real, logged-into AVD desktop in under 30 minutes — no domain controller, no manual RBAC, no copy-pasting IDs. Pizza-themed, because infrastructure demos don't have to be boring.
 
-[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fnickprignano%2Ffresh-desktop-demo%2Fe0b37e2e12429bd24987ad2987ef6a2bcbc5e73d%2Fazuredeploy.json)
+[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fnickprignano%2Ffresh-desktop-demo%2F33cffcabf2e2b887ab80d09d1a58c0d75d9142b5%2Fazuredeploy.json)
 
 > Deploy button and the template's own extension-script fetches are pinned to a specific commit SHA, not `main` — per data-governance review finding F2 (High) / RAID R-3 mitigation, 2026-08-24. A push to `main` no longer silently changes what gets deployed; re-pinning to a new SHA is a deliberate, reviewed step.
 
