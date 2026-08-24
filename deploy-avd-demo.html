@@ -272,10 +272,22 @@
   .now-playing .blurb { color: var(--muted); font-size: 13px; margin-top: 2px; }
   .elapsed {
     font-variant-numeric: tabular-nums;
-    color: var(--warn);
+    /* #f87171 (not var(--warn)/--accent2) — the darker Italian red fails WCAG AA contrast
+       (~3.85:1) at this font size/weight; this lighter red clears 4.5:1 on both --bg and
+       --card. See RAID R-14. */
+    color: #f87171;
     font-weight: 700;
     font-size: 15px;
     white-space: nowrap;
+  }
+  /* Visible keyboard-focus ring on every interactive element — buttons here use border:none,
+     so the browser default focus indicator can be easy to miss against the dark theme. R-14. */
+  button:focus-visible,
+  a:focus-visible,
+  input:focus-visible,
+  .stage-node:focus-visible {
+    outline: 3px solid var(--italy-white);
+    outline-offset: 2px;
   }
   .delivered-banner {
     display: none;
@@ -426,7 +438,7 @@
   </div>
 </div>
 <div class="wrap">
-  <div class="tricolor-bar"><span class="g"></span><span class="w"></span><span class="r"></span></div>
+  <div class="tricolor-bar" aria-hidden="true"><span class="g"></span><span class="w"></span><span class="r"></span></div>
   <div class="pill">Internal demo &middot; deploys into your own live Azure subscription</div>
   <div class="brand">🍕 Fresh Desktop <span class="tag">🇮🇹 made fresh to order</span></div>
   <p class="sub">One click deploys a native Azure Virtual Desktop environment&mdash;host pool, workspace, desktop app group, and one Microsoft&nbsp;Entra&#8209;joined Windows&nbsp;11 session host&mdash;and grants <em>you</em> access automatically. No domain controller, no manual RBAC. Order it, watch it bake, log in fresh.</p>
@@ -468,9 +480,19 @@
       <div class="calc-hourly" id="calcHourly">Loading live Azure pricing&hellip;</div>
       <div class="calc-line" id="calcDemo"></div>
       <div class="calc-line" id="calcMonthly"></div>
+      <div class="calc-line" id="calcTTL"></div>
       <p class="muted" id="calcBreakdown" style="margin-top:8px; font-size:12px;"></p>
-      <p class="status-text" id="calcSourceNote" style="margin-top:8px;"></p>
+      <p class="status-text" id="calcSourceNote" style="margin-top:8px;" aria-live="polite"></p>
       <p class="muted" id="orderSummaryLine" style="margin-top:8px;"></p>
+    </div>
+
+    <div class="ttl-picker" style="margin-top:16px;">
+      <h3 style="margin:0 0 4px 0; font-size:14px;">⏱️ Auto-destroy after</h3>
+      <p class="muted" style="margin-bottom:8px; font-size:12px;">Tags this resource group with a self-destruct deadline and a unique order number. <strong>Tagging alone doesn't delete anything</strong> — something has to read the tag and act on it. If you've set up the optional one-time watcher (runbook step 3d) in this subscription, it enforces this automatically; otherwise, treat it as a reminder and still do step 8 yourself. Match this number in the Portal's Basics tab like your other picks.</p>
+      <div class="status-row" style="align-items:center; gap:12px;">
+        <input type="range" id="selfDestructSlider" min="1" max="12" step="1" value="4" style="flex:1; accent-color: var(--accent);" oninput="onSelfDestructChange(this.value)">
+        <span class="pill" id="selfDestructLabel" style="min-width:88px; text-align:center;">4 hours</span>
+      </div>
     </div>
 
     <div class="status-row" style="margin-top:16px;">
@@ -487,10 +509,10 @@
       <input type="checkbox" id="downloadEncCheckbox" style="width:16px; height:16px; margin:0; accent-color: var(--accent);">
       <label for="downloadEncCheckbox" class="muted" style="cursor:pointer;">Also download an encrypted backup file</label>
     </div>
-    <p class="status-text" id="pwStatus" style="margin-top:8px;"></p>
+    <p class="status-text" id="pwStatus" style="margin-top:8px;" aria-live="polite"></p>
 
     <button class="btn-primary" id="deployMainBtn" onclick="deployToAzure()" style="margin-top:18px; background: var(--accent2);">🚀 Deploy to Azure</button>
-    <p class="status-text" id="publishStatus" style="margin-top:10px;"></p>
+    <p class="status-text" id="publishStatus" style="margin-top:10px;" aria-live="polite"></p>
   </div>
 
   <div class="card step-hidden" id="trackCard">
@@ -547,16 +569,18 @@
     <div class="status-row">
       <button class="btn-primary" style="margin-top:14px; background: var(--accent2);" onclick="copyCleanupCommand()">📋 Copy Command &amp; Open Cloud Shell</button>
     </div>
-    <p class="status-text" id="cleanupStatus" style="margin-top:10px;"></p>
+    <p class="status-text" id="cleanupStatus" style="margin-top:10px;" aria-live="polite"></p>
     <p class="muted" style="margin-top:14px;">Cloud Shell will open in a new tab &mdash; just paste (Ctrl/Cmd+V) and hit enter; it may ask you to sign in and pick a subscription/storage the first time. Prefer clicking through instead? <a href="https://portal.azure.com/#view/HubsExtension/BrowseResourceGroups.ReactView" target="_blank" style="color:#7fffa0;">Open Resource Groups in the Portal</a> and delete it from there.</p>
   </div>
 </div>
 
 <script>
 // The template is hosted permanently at a fixed public GitHub repo — no publishing step needed.
-// Confirm this is still the repo's actual default branch before the demo (checked "main" at build time;
-// re-verify with `git remote show origin` or the repo's GitHub page if this was ever repointed).
-const RAW_TEMPLATE_URL = 'https://raw.githubusercontent.com/nickprignano/fresh-desktop-demo/main/azuredeploy.json';
+// Pinned to a specific commit SHA (not `main`), per data-governance review finding F2 (High) / RAID R-3
+// mitigation, 2026-08-24 — a future push to `main` can no longer silently change what this button deploys.
+// To ship a template change: commit + push to main, then deliberately re-pin this URL (and the README
+// Deploy-to-Azure button) to the new commit SHA as its own reviewed step, after re-verifying the template.
+const RAW_TEMPLATE_URL = 'https://raw.githubusercontent.com/nickprignano/fresh-desktop-demo/e0b37e2e12429bd24987ad2987ef6a2bcbc5e73d/azuredeploy.json';
 
 // ---- Progressive reveal: sections only show up once they're actually relevant ----
 function revealStep(id, scroll) {
@@ -943,8 +967,17 @@ const priceState = {
   diskMonthlyByCrust: {},  // crust (disk tier) key -> $/month
   selectedSize: 'personal',
   selectedCrust: 'stuffed',
-  selectedTopping: 'cheese'
+  selectedTopping: 'cheese',
+  selfDestructHours: 4
 };
+
+// ---- Self-destruct TTL (matched to the ARM template's selfDestructHours param, default 4 / max 12) ----
+function onSelfDestructChange(hours) {
+  priceState.selfDestructHours = parseInt(hours, 10) || 4;
+  const label = document.getElementById('selfDestructLabel');
+  if (label) label.textContent = priceState.selfDestructHours + (priceState.selfDestructHours === 1 ? ' hour' : ' hours');
+  renderPriceCalc();
+}
 
 function fetchWithTimeout(url, ms) {
   const controller = new AbortController();
@@ -1031,9 +1064,13 @@ function renderPriceCalc() {
     btn.classList.toggle('active', btn.dataset.key === priceState.selectedTopping);
   });
 
+  const ttlHours = priceState.selfDestructHours || 4;
+  const ttlCost = totalHr * ttlHours;
+
   document.getElementById('calcHourly').textContent = money(totalHr, 3) + ' / hr';
   document.getElementById('calcDemo').textContent = '≈ ' + money(demoCost, 2) + ' for a typical ~20 min demo';
   document.getElementById('calcMonthly').textContent = '≈ ' + money(monthlyCost, 2) + ' / mo if left running 24/7';
+  document.getElementById('calcTTL').textContent = '≈ ' + money(ttlCost, 2) + ' worst case if it runs the full ' + ttlHours + '-hour auto-destroy window';
   document.getElementById('calcBreakdown').innerHTML =
     'Compute (' + sizeSel.armSku + ', ' + PRICE_REGION + '): ' + money(computeHr, 3) + '/hr &middot; ' +
     'OS disk (' + crustSel.armDiskType + '): ' + money(diskHr, 4) + '/hr &middot; ' +
@@ -1041,7 +1078,7 @@ function renderPriceCalc() {
 
   const orderSummaryText = sizeSel.label.replace(/^\S+\s*/, '') + ' · ' + crustSel.label.replace(/^\S+\s*/, '') + ' · ' + toppingSel.label.replace(/^\S+\s*/, '');
   const orderEl = document.getElementById('orderSummaryLine');
-  if (orderEl) orderEl.textContent = 'Your order: ' + orderSummaryText + ' — match these in the Portal\'s Basics tab.';
+  if (orderEl) orderEl.textContent = 'Your order: ' + orderSummaryText + ' · auto-destroy in ' + ttlHours + 'h — match these in the Portal\'s Basics tab.';
 
   // Mirror the headline number into the top-right badge while it's still in "building" mode
   // (see showTimerBadge(), called once from startPresoTimer() — one-way swap, never reverts).

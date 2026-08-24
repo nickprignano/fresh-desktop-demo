@@ -2,7 +2,9 @@
 
 A one-click Azure Virtual Desktop demo. Click a button, get a real, logged-into AVD desktop in under 30 minutes — no domain controller, no manual RBAC, no copy-pasting IDs. Pizza-themed, because infrastructure demos don't have to be boring.
 
-[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fnickprignano%2Ffresh-desktop-demo%2Fmain%2Fazuredeploy.json)
+[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fnickprignano%2Ffresh-desktop-demo%2Fe0b37e2e12429bd24987ad2987ef6a2bcbc5e73d%2Fazuredeploy.json)
+
+> Deploy button and the template's own extension-script fetches are pinned to a specific commit SHA, not `main` — per data-governance review finding F2 (High) / RAID R-3 mitigation, 2026-08-24. A push to `main` no longer silently changes what gets deployed; re-pinning to a new SHA is a deliberate, reviewed step.
 
 ## What this deploys
 
@@ -24,6 +26,8 @@ This is a demo/proof-of-concept template, not hardened for production use.
 
 Full walkthrough, pre-flight checklist, and troubleshooting notes are in [`AVD-DEMO-RUNBOOK.md`](./AVD-DEMO-RUNBOOK.md).
 
+**Running this yourself and want it to clean up after itself?** Every deploy tags its resource group with a self-destruct deadline (pick 1–12 hours in step 5 of the page), but nothing deletes it automatically unless you set that up too — see the runbook's step 3d for a one-time, CLI-only watcher you can add to your own subscription in a few minutes.
+
 ## Repo contents
 
 | File | Purpose |
@@ -32,6 +36,7 @@ Full walkthrough, pre-flight checklist, and troubleshooting notes are in [`AVD-D
 | `deploy-avd-demo.html` | Themed landing page that triggers the deployment |
 | `fresh-desktop-branding.ps1` | Wallpaper-branding script, fetched by the template at deploy time via raw GitHub URL |
 | `office-apps-install.ps1` | Microsoft 365 Apps post-install script (Sausage topping only), same fetch mechanism |
+| `self-destruct-runbook.ps1` | Optional Azure Automation runbook — deletes resource groups past their tagged self-destruct deadline. Set up once via CLI (runbook step 3d), not required to run the demo |
 | `AVD-DEMO-RUNBOOK.md` | Full setup, demo, and troubleshooting runbook |
 
 ## License
