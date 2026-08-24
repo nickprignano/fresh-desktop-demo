@@ -84,12 +84,26 @@
     "utcValue": {
       "type": "string",
       "defaultValue": "[utcNow()]"
+    },
+    "selfDestructHours": {
+      "type": "int",
+      "defaultValue": 4,
+      "minValue": 1,
+      "maxValue": 12,
+      "metadata": {
+        "description": "Hours from deployment until this resource group is automatically torn down (default 4, max 12). Written as a resource-group tag (SelfDestructAtUtc) alongside a shared OrderNumber tag — the lab-manager teardown backend reads both to enforce the deadline and record destruction, independently verifiable against this template's own tags. This template does not delete anything itself; see FreshDesktopDemo ADR-2."
+      }
     }
   },
   "variables": {
+    "orderNumber": "[concat(parameters('namePrefix'), '-', dateTimeAdd(parameters('utcValue'), 'PT0H', 'yyyyMMddHHmmss'))]",
+    "selfDestructAtUtc": "[dateTimeAdd(parameters('utcValue'), concat('PT', string(parameters('selfDestructHours')), 'H'))]",
+    "labExpiryMode": "[concat('Hours', string(parameters('selfDestructHours')))]",
     "hostPoolName": "[concat(parameters('namePrefix'), '-hp')]",
     "appGroupName": "[concat(parameters('namePrefix'), '-dag')]",
     "workspaceName": "[concat(parameters('namePrefix'), '-ws')]",
+    "nsgName": "[concat(parameters('namePrefix'), '-nsg')]",
+    "logAnalyticsWorkspaceName": "[concat(parameters('namePrefix'), '-law')]",
     "vnetName": "[concat(parameters('namePrefix'), '-vnet')]",
     "subnetName": "default",
     "nicName": "[concat(parameters('namePrefix'), '-nic')]",
@@ -137,6 +151,38 @@
   },
   "resources": [
     {
+      "type": "Microsoft.Resources/tags",
+      "apiVersion": "2023-07-01",
+      "name": "default",
+      "comments": "Sets resource-group-level tags: OrderNumber (shared correlation ID) + SelfDestructAtUtc (expiration deadline) are the tag contract handed off to the lab-manager teardown backend (see FreshDesktopDemo ADR-2) — this template does not enforce deletion itself, only publishes what the backend needs to read and, on its side, log destruction against the same OrderNumber for independent verification. LabExpiryDate/LabExpiryMode/LabKit are a second, double-tag contract added 2026-08-23 once lab-manager confirmed the exact keys/formats its own LabExpiry.psm1/Invoke-LabKillSwitch.ps1 read (see RAID DEP-2) — LabExpiryDate duplicates SelfDestructAtUtc verbatim (same instant, no second computation), LabExpiryMode is a label only today (their killswitch doesn't consult it — see RAID I-15 on lab-manager's side), and LabKit is their fixed literal for this lab, not a per-deploy value.",
+      "properties": {
+        "tags": {
+          "Project": "fresh-desktop-avd-demo",
+          "OrderNumber": "[variables('orderNumber')]",
+          "DeployedAtUtc": "[parameters('utcValue')]",
+          "SelfDestructAtUtc": "[variables('selfDestructAtUtc')]",
+          "SelfDestructHours": "[string(parameters('selfDestructHours'))]",
+          "DeployedBy": "[deployer().userPrincipalName]",
+          "LabExpiryDate": "[variables('selfDestructAtUtc')]",
+          "LabExpiryMode": "[variables('labExpiryMode')]",
+          "LabKit": "LabManager"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.OperationalInsights/workspaces",
+      "apiVersion": "2022-10-01",
+      "name": "[variables('logAnalyticsWorkspaceName')]",
+      "location": "[parameters('location')]",
+      "comments": "Added per data-governance review finding F3 (Medium) / RAID R-13 monitoring gap, 2026-08-24 — previously only the platform-default Activity Log applied (no diagnostic settings, Log Analytics workspace, or NSG flow logs). This workspace is the diagnostic-settings destination for the NSG and the AVD host pool/workspace below, so a real deployment now produces actual monitoring data instead of relying on the platform default alone. Torn down with the rest of the resource group on self-destruct (no separate retention need for an ephemeral demo).",
+      "properties": {
+        "sku": {
+          "name": "PerGB2018"
+        },
+        "retentionInDays": 30
+      }
+    },
+    {
       "type": "Microsoft.Network/publicIPAddresses",
       "apiVersion": "2023-09-01",
       "name": "[variables('natPublicIPName')]",
@@ -168,12 +214,61 @@
       }
     },
     {
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "apiVersion": "2023-09-01",
+      "name": "[variables('nsgName')]",
+      "location": "[parameters('location')]",
+      "comments": "Explicit deny-inbound baseline (RAID Risk R-13, Full Architecture Review 2026-08-23). The session host has no public IP and isn't open to inbound internet traffic regardless (NAT Gateway is outbound-only, AVD reverse-connects outbound to the service), so this NSG's default rules already match that reality — it's added for an explicit, auditable security boundary on the subnet rather than relying solely on 'no public IP' as the only control. No custom rules needed: Azure's built-in NSG defaults (DenyAllInBound below any AllowVnetInBound/AllowAzureLoadBalancerInBound, AllowVnetOutBound/AllowInternetOutBound) already match this template's actual traffic pattern.",
+      "properties": {
+        "securityRules": [
+          {
+            "name": "DenyAllInboundFromInternet",
+            "properties": {
+              "priority": 200,
+              "direction": "Inbound",
+              "access": "Deny",
+              "protocol": "*",
+              "sourcePortRange": "*",
+              "destinationPortRange": "*",
+              "sourceAddressPrefix": "Internet",
+              "destinationAddressPrefix": "*",
+              "description": "Explicit, auditable deny of internet-sourced inbound traffic — redundant with the built-in default deny (belt-and-suspenders, not a substitute for the VM having no public IP)."
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Network/networkSecurityGroups/providers/diagnosticSettings",
+      "apiVersion": "2021-05-01-preview",
+      "name": "[concat(variables('nsgName'), '/Microsoft.Insights/nsg-diagnostics')]",
+      "comments": "Added per data-governance review finding F3 (Medium), 2026-08-24 — routes NSG rule/event logs to the Log Analytics workspace above so inbound-deny activity on this subnet is actually observable, not just implied by the NSG's rule config.",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]",
+        "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsWorkspaceName'))]"
+      ],
+      "properties": {
+        "workspaceId": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsWorkspaceName'))]",
+        "logs": [
+          {
+            "category": "NetworkSecurityGroupEvent",
+            "enabled": true
+          },
+          {
+            "category": "NetworkSecurityGroupRuleCounter",
+            "enabled": true
+          }
+        ]
+      }
+    },
+    {
       "type": "Microsoft.Network/virtualNetworks",
       "apiVersion": "2023-09-01",
       "name": "[variables('vnetName')]",
       "location": "[parameters('location')]",
       "dependsOn": [
-        "[resourceId('Microsoft.Network/natGateways', variables('natGatewayName'))]"
+        "[resourceId('Microsoft.Network/natGateways', variables('natGatewayName'))]",
+        "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
       ],
       "properties": {
         "addressSpace": {
@@ -188,6 +283,9 @@
               "addressPrefix": "[variables('subnetPrefix')]",
               "natGateway": {
                 "id": "[resourceId('Microsoft.Network/natGateways', variables('natGatewayName'))]"
+              },
+              "networkSecurityGroup": {
+                "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
               }
             }
           }
@@ -264,6 +362,46 @@
       }
     },
     {
+      "type": "Microsoft.DesktopVirtualization/hostPools/providers/diagnosticSettings",
+      "apiVersion": "2021-05-01-preview",
+      "name": "[concat(variables('hostPoolName'), '/Microsoft.Insights/hostpool-diagnostics')]",
+      "comments": "Added per data-governance review finding F3 (Medium), 2026-08-24 — routes host pool connection/registration/agent-health logs to the Log Analytics workspace above, giving real sign-in/session diagnostics instead of relying on the platform-default Activity Log.",
+      "dependsOn": [
+        "[resourceId('Microsoft.DesktopVirtualization/hostPools', variables('hostPoolName'))]",
+        "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsWorkspaceName'))]"
+      ],
+      "properties": {
+        "workspaceId": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsWorkspaceName'))]",
+        "logs": [
+          { "category": "Checkpoint", "enabled": true },
+          { "category": "Error", "enabled": true },
+          { "category": "Management", "enabled": true },
+          { "category": "Connection", "enabled": true },
+          { "category": "HostRegistration", "enabled": true },
+          { "category": "AgentHealthStatus", "enabled": true }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.DesktopVirtualization/workspaces/providers/diagnosticSettings",
+      "apiVersion": "2021-05-01-preview",
+      "name": "[concat(variables('workspaceName'), '/Microsoft.Insights/workspace-diagnostics')]",
+      "comments": "Added per data-governance review finding F3 (Medium), 2026-08-24 — routes AVD workspace feed/management logs to the same Log Analytics workspace.",
+      "dependsOn": [
+        "[resourceId('Microsoft.DesktopVirtualization/workspaces', variables('workspaceName'))]",
+        "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsWorkspaceName'))]"
+      ],
+      "properties": {
+        "workspaceId": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsWorkspaceName'))]",
+        "logs": [
+          { "category": "Checkpoint", "enabled": true },
+          { "category": "Error", "enabled": true },
+          { "category": "Management", "enabled": true },
+          { "category": "Feed", "enabled": true }
+        ]
+      }
+    },
+    {
       "type": "Microsoft.Compute/virtualMachines",
       "apiVersion": "2023-09-01",
       "name": "[variables('vmName')]",
@@ -328,6 +466,7 @@
       "name": "[concat(variables('vmName'), '/OfficeAppsInstall')]",
       "location": "[parameters('location')]",
       "condition": "[equals(parameters('pizzaToppings'), '🌭 Sausage (Windows 11 25H2 Enterprise, newest)')]",
+      "comments": "fileUris pinned to a specific commit SHA (not `main`), per data-governance review finding F2 (High) / RAID R-3 mitigation, 2026-08-24 — a future push to `main` can no longer silently change what this script executes. Re-pin to a new SHA deliberately, after re-verifying the script, if it's ever revised.",
       "dependsOn": [
         "[resourceId('Microsoft.Compute/virtualMachines', variables('vmName'))]"
       ],
@@ -338,7 +477,7 @@
         "autoUpgradeMinorVersion": true,
         "settings": {
           "fileUris": [
-            "https://raw.githubusercontent.com/nickprignano/fresh-desktop-demo/main/office-apps-install.ps1"
+            "https://raw.githubusercontent.com/nickprignano/fresh-desktop-demo/c3c578b8f6852a7003aa315fc98cf7a4e8e739ff/office-apps-install.ps1"
           ],
           "commandToExecute": "powershell.exe -NonInteractive -ExecutionPolicy Bypass -File office-apps-install.ps1"
         }
@@ -377,6 +516,7 @@
       "apiVersion": "2023-09-01",
       "name": "[concat(variables('vmName'), '/FreshDesktopBranding')]",
       "location": "[parameters('location')]",
+      "comments": "fileUris pinned to a specific commit SHA (not `main`), per data-governance review finding F2 (High) / RAID R-3 mitigation, 2026-08-24 — a future push to `main` can no longer silently change what this script executes. Re-pin to a new SHA deliberately, after re-verifying the script, if it's ever revised.",
       "dependsOn": [
         "[resourceId('Microsoft.Compute/virtualMachines/extensions', variables('vmName'), 'AVDAgentDSC')]"
       ],
@@ -387,7 +527,7 @@
         "autoUpgradeMinorVersion": true,
         "settings": {
           "fileUris": [
-            "https://raw.githubusercontent.com/nickprignano/fresh-desktop-demo/main/fresh-desktop-branding.ps1"
+            "https://raw.githubusercontent.com/nickprignano/fresh-desktop-demo/c3c578b8f6852a7003aa315fc98cf7a4e8e739ff/fresh-desktop-branding.ps1"
           ],
           "commandToExecute": "powershell.exe -NonInteractive -ExecutionPolicy Bypass -File fresh-desktop-branding.ps1"
         }
@@ -439,7 +579,19 @@
     },
     "orderSummary": {
       "type": "string",
-      "value": "[concat('Order: ', parameters('pizzaSize'), ' | ', parameters('pizzaCrust'), ' | ', parameters('pizzaToppings'), ' | ', parameters('toppingPepperoni'))]"
+      "value": "[concat('Order: ', parameters('pizzaSize'), ' | ', parameters('pizzaCrust'), ' | ', parameters('pizzaToppings'), ' | ', parameters('toppingPepperoni'), ' | Order #', variables('orderNumber'), ' | auto-destroys ', variables('selfDestructAtUtc'))]"
+    },
+    "orderNumber": {
+      "type": "string",
+      "value": "[variables('orderNumber')]"
+    },
+    "selfDestructAtUtc": {
+      "type": "string",
+      "value": "[variables('selfDestructAtUtc')]"
+    },
+    "logAnalyticsWorkspaceName": {
+      "type": "string",
+      "value": "[variables('logAnalyticsWorkspaceName')]"
     }
   }
 }
