@@ -1,0 +1,19 @@
+# Added 2026-08-24 — dev-governance audit finding (standard 14 backup discipline / standard 18
+# public-repo content scan). This repo (nickprignano/fresh-desktop-demo) is public — nothing AHEAD-
+# internal or unrelated to the demo itself should ever be a `git add` away from landing in it.
+
+# Orphaned Node.js dependency tree — no package.json/lockfile exists anywhere in this repo to
+# explain its presence (25MB, jsdom + transitive deps). Untracked already; excluding so a future
+# `git add -A`/`git add .` can't sweep it in by accident. Flagged separately as RAID Issue I-2 —
+# see FreshDesktopDemo_RAID_Crosswalk_08202026.md.
+node_modules/
+
+# AHEAD-internal project tracking (RAID/ADR/lessons-learned/RACI/contingency-plan working files) —
+# not part of the public one-click demo itself, and references AHEAD-internal project names
+# (e.g. lab-manager) and RAID IDs per standard 18's public-repo content-scan discipline.
+_tracking/
+
+# AHEAD-internal lab-manager workload-onboarding submission package (design doc, cost model, data-
+# governance review, readiness workbook) — internal review artifacts for getting this workload
+# registered in AHEAD's own shared lab, not public demo content.
+lab-manager-submission/
