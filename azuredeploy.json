@@ -477,7 +477,7 @@
         "autoUpgradeMinorVersion": true,
         "settings": {
           "fileUris": [
-            "https://raw.githubusercontent.com/nickprignano/fresh-desktop-demo/33cffcabf2e2b887ab80d09d1a58c0d75d9142b5/office-apps-install.ps1"
+            "https://raw.githubusercontent.com/nickprignano/fresh-desktop-demo//office-apps-install.ps1"
           ],
           "commandToExecute": "powershell.exe -NonInteractive -ExecutionPolicy Bypass -File office-apps-install.ps1"
         }
@@ -527,7 +527,7 @@
         "autoUpgradeMinorVersion": true,
         "settings": {
           "fileUris": [
-            "https://raw.githubusercontent.com/nickprignano/fresh-desktop-demo/33cffcabf2e2b887ab80d09d1a58c0d75d9142b5/fresh-desktop-branding.ps1"
+            "https://raw.githubusercontent.com/nickprignano/fresh-desktop-demo//fresh-desktop-branding.ps1"
           ],
           "commandToExecute": "powershell.exe -NonInteractive -ExecutionPolicy Bypass -File fresh-desktop-branding.ps1"
         }
