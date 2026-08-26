@@ -232,7 +232,7 @@
               "destinationPortRange": "*",
               "sourceAddressPrefix": "Internet",
               "destinationAddressPrefix": "*",
-              "description": "Explicit, auditable deny of internet-sourced inbound traffic — redundant with the built-in default deny (belt-and-suspenders, not a substitute for the VM having no public IP)."
+              "description": "Explicit, auditable deny of internet inbound traffic; redundant with NSG defaults (VM has no public IP regardless)."
             }
           }
         ]
