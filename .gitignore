@@ -17,3 +17,16 @@ _tracking/
 # governance review, readiness workbook) — internal review artifacts for getting this workload
 # registered in AHEAD's own shared lab, not public demo content.
 lab-manager-submission/
+
+# Added 2026-09-05 — Phase 0 remediation. Claude Code's own local settings; never meant to be
+# part of the public demo and no reason a fork/clone would need it.
+.claude/
+
+# Scratch state file for a not-yet-built turnkey commit script (GOVERNANCE.md item 1) — not
+# meaningful content, shouldn't land in a commit by accident.
+scripts/pending-commit.json
+
+# Project instructions file for Claude Code/Cowork sessions — kept out of the public repo by
+# Nick's explicit decision (2026-09-05); content itself was reviewed as public-safe, but this
+# repo's own public-facing surface shouldn't include AI-assistant-specific instructions.
+CLAUDE.md
