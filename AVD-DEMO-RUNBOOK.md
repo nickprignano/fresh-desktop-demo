@@ -10,7 +10,7 @@ Goal: click a button on a web page, get a real, logged-into Azure Virtual Deskto
 - Outbound internet via a **NAT Gateway** (Standard SKU, static public IP) — the VM has no public IP and isn't open to inbound internet traffic. This replaces reliance on Azure's now-retired "default outbound access," which new VNets stopped getting after 2026-03-31 (see Risk R-6). **Note for whoever configures Conditional Access for SSO (below): this NAT Gateway's public IP is not stable across deploy/teardown cycles** — avoid IP-based location conditions on this flow (Risk R-7).
 - RBAC: whoever runs the deployment is automatically granted `Desktop Virtualization User` on the app group and `Virtual Machine User Login` on the VM (via the ARM `deployer()` function) — no manual object-ID lookups needed. **Start VM on Connect additionally needs a one-time, subscription-scope RBAC grant that the template itself cannot make — see pre-flight step 3a.**
 - **Pizza-themed flavor pickers**: Pizza Size (VM size: Personal Pan / Family Size / Large Party), Crust (OS disk tier, Chicago-style naming: Thin / Stuffed / Deep Dish = Standard HDD / Standard SSD / Premium SSD), and Toppings (Windows 11 Enterprise image version: Cheese = 24H2 / Sausage = 25H2, newest, **+ Microsoft 365 Apps installed post-deploy (see below)** / Pepperoni = 23H2, older — single-session Enterprise has no marketplace SKU with Microsoft 365 Apps *preinstalled*, so as of 2026-08-20 only Sausage gets Office, via a real post-install step, not a baked-in image) are each a row of real, clickable buttons on the page itself (steps 1–3), previewing live pricing as you go — and the exact same three choices also render natively as real ARM-parameter dropdowns in the Azure Portal's own deployment form once you deploy, so what you pick on the page is what you match in the Basics tab. All default-selected so Review + Create needs zero clicks, but every option is a real, changeable dropdown on stage. Every combination still lands inside the same ~18-minute deploy window — none of these add real time to the *session host becoming available*, they just change $/hr, in-session performance, and (for Sausage) whether Office is ready the instant you log in. Note: the clipboard/drive-redirection toggle (pizza-themed as a "pepperoni" Yes/No switch) only ever lived in the Portal's own Basics tab, not on the page — so "Pepperoni" now names both one of the three page-side Topping choices and, unrelatedly, that Yes/No clipboard-redirection toggle in the portal. Same word, two different fields; worth a glance before a live demo so it doesn't trip you up. **The separate "extra cheese" session-capacity toggle was removed entirely 2026-08-20** — it set the host pool's max concurrent session limit, which is meaningless for a Personal host pool (always exactly one user per VM); see Decision D-3.
-- **Office Apps post-install (Sausage only, added 2026-08-20):** a fourth VM extension (`OfficeAppsInstall`, `CustomScriptExtension`, conditioned on the Sausage topping) installs Microsoft 365 Apps for enterprise via the Office Deployment Tool, Monthly Enterprise Channel, with Shared Computer Activation enabled (Microsoft's documented best practice for any AVD host pool). It depends only on the VM existing — same dependency level as `AADLoginForWindows` — so it starts immediately at boot, in parallel with the Entra-join step, not gated on anyone signing in. On Family Size or Large Party it typically finishes before the Entra-join + AVD-agent-registration chain does, so Office is usually ready the moment you can actually log in; on Personal Pan it may still be finishing (expected, not a bug). **Activation depends on `builder`'s license actually including Microsoft 365 Apps** (M365 E3/E5 does; a standalone Entra ID P1/P2 does not) — ties directly to Dependency DEP-1's licensing outcome.
+- **Office Apps post-install (Sausage only, added 2026-08-20):** a fourth VM extension (`OfficeAppsInstall`, `CustomScriptExtension`, conditioned on the Sausage topping) installs Microsoft 365 Apps for enterprise via the Office Deployment Tool, Monthly Enterprise Channel, with Shared Computer Activation enabled (Microsoft's documented best practice for any AVD host pool). It depends only on the VM existing — same dependency level as `AADLoginForWindows` — so it starts immediately at boot, in parallel with the Entra-join step, not gated on anyone signing in. On Family Size or Large Party it typically finishes before the Entra-join + AVD-agent-registration chain does, so Office is usually ready the moment you can actually log in; on Personal Pan it may still be finishing (expected, not a bug). **Activation depends on `builder`'s license actually including Microsoft 365 Apps** (M365 E3/E5 does; a standalone Entra ID P1/P2 does not) — ties directly to Dependency DEP-1's licensing outcome. **Decided 2026-08-28 — closes `DEP-1`:** going with **Microsoft 365 E3, month-to-month**, not F3 — confirmed via Microsoft Learn that F3 doesn't include desktop Microsoft 365 Apps (web/mobile only), so it would have satisfied the Conditional Access/Entra ID P1 need in item 3aa.3 below but left this Office-activation half of `DEP-1` unresolved. E3 covers both. Purchase was in progress as of this writing (tenant had zero licenses assigned at last check) — confirm the license has actually landed and is assigned to `builder` before the next dry run, since this gates whether the Sausage topping's Office install actually activates.
 - **Auto-destroy after (step 5, added 2026-08-23):** a slider next to the Deploy button sets how many
   hours (1–12, default 4) until Azure tears the whole resource group down on its own — matches the
   `selfDestructHours` ARM parameter, which you also pick in the Portal's Basics tab like the other
@@ -38,13 +38,16 @@ Files: `azuredeploy.json` (the template), `deploy-avd-demo.html` (the trigger pa
 
 ## Before tomorrow — do this today, not live
 
-1. **Set up and unlock the `builder` deployment identity — do this first, it has its own gotcha.** Use a dedicated Entra ID account named `builder` for all deployment and demo work:
-   - **Not** the original outlook.com / tenant-creator account — it's an MSA-bridge identity with its own MFA/sign-in quirks that don't behave like a normal Entra account.
+1. **Set up and unlock the `builder` deployment identity — do this first, it has its own gotcha.** Use a dedicated Entra ID account named `builder` for deployment and on-stage demo login:
+   - **Not** the original outlook.com / tenant-creator account — it's an MSA-bridge identity with its own MFA/sign-in quirks that don't behave like a normal Entra account, and it's kept as the break-glass account (see below).
    - **Not** the break-glass account — leave that untouched, emergency-only.
 
-   `builder` needs two separate grants — having one does **not** imply the other:
-   - **Global Administrator** (Entra ID role)
-   - **Owner** (Azure RBAC, scoped to the subscription)
+   **Account model (resolved 2026-08-27, closes RAID `I-1` — see 3aa item 5 below):** three separate identities, deliberately not one do-everything account:
+   - **`builder`** — **Azure RBAC Owner only** (subscription scope), **no Entra directory role**. Deploys the template and signs into the AVD desktop on stage.
+   - **A dedicated Entra-admin account** — holds an Entra directory role (Global Administrator or, at minimum, Security Administrator / Conditional Access Administrator), used only to configure Conditional Access, Security Defaults, and per-user MFA (3aa below), and to manage `builder`'s own role assignments. Never used for deploy or demo login.
+   - **The original outlook.com / tenant-creator account** — holds **both** Entra Global Administrator and Azure Owner. Break-glass/tenant-bootstrap only, untouched, not used for routine setup or demo work.
+
+   This replaces the single-identity assumption this step originally documented (`builder` holding both Global Administrator and Owner) — see 3aa item 5 for why it changed.
 
    **Gotcha:** a brand-new Entra ID user is forced through MFA registration and a password change on first use, and that has to happen via an interactive browser sign-in — go to `https://myaccount.microsoft.com`, sign in as `builder`, and complete both prompts. Do this *before* trying `az login` or signing into the portal as `builder`; a fresh account that's never been through interactive sign-in will fail or hang on `az login`.
 
@@ -80,11 +83,11 @@ Files: `azuredeploy.json` (the template), `deploy-avd-demo.html` (the trigger pa
    If terms aren't accepted, run `az vm image terms accept --urn ...` for that exact SKU before the demo, not live.
 
 3aa. **SSO / Conditional Access pre-flight (Issue I-1) — do this before the next dry run, not after another failure.** Per Microsoft's own troubleshooting guide for AVD SSO/Conditional Access, work through this in order:
-   1. **Security Defaults + Global Admin, the most likely culprit for `builder` specifically.** Microsoft's docs and multiple confirmed support cases describe this exact shape: *if Security Defaults are enabled, Global Administrators are always forced through MFA at VM sign-in, independent of per-user MFA or Conditional Access settings* — and `builder` holds Global Administrator by design (step 1 above). Check **Entra admin center → Identity → Overview → Properties → Security Defaults**. If enabled, this is very plausibly why the dry run's SSO failed, and disabling Security Defaults alone does not fix it either — Conditional Access (which you need to configure properly instead, see below) explicitly cannot be layered on top of Security Defaults; one or the other, not both.
-   2. **Per-user MFA disabled for `builder`.** Entra admin center → Identity → Users → All users → **Per-user MFA** toolbar button → confirm `builder` shows **Disabled**. This is required on Entra-joined session hosts regardless of Conditional Access — it isn't just a caveat, it actively breaks sign-in ("The sign-in method you're trying to use isn't allowed").
-   3. **Two-policy Conditional Access structure**, not one combined policy: Policy 1 targets the **Azure Virtual Desktop** app (`9cdead84-a844-4324-93f2-b2e6bb768d07`, feed/gateway auth); Policy 2 targets the **Windows Cloud Login** app (`270efc09-cd0d-444b-a71f-39af4910ec45`, session-host SSO). Give Policy 2 the same or higher sign-in frequency than Policy 1 — a mismatch causes mid-session reauthentication prompts. Requires Entra ID P1/P2 — ties directly to Dependency DEP-1's still-unresolved licensing question.
-   4. **No stray "All cloud apps" policy catches these two apps with a device-compliance requirement.** An Entra-joined AVD session host will not generally satisfy a compliance policy written for end-user client devices — scope compliance requirements to client endpoints, not session hosts.
-   5. **If `builder` still can't sign in cleanly after 1–4 are confirmed clean**, the most likely remaining cause is structural, not a misconfiguration: `builder`'s Global Administrator role itself. The documented workaround in Microsoft's own support guidance is to **not** sign in to the AVD session with the same identity that holds Global Admin — test with a second, ordinary (non-admin) Entra account that only holds the app-group/VM-login role assignments. **This is a real open decision, not yet made:** either (a) accept that `builder` stays a single do-everything identity and structure Conditional Access/Security Defaults so a Global Admin can still sign in cleanly, or (b) split the identity — keep `builder` for one-time admin setup (steps 1–3d) and introduce a second, ordinary account for the actual demo login on stage, which would need its own RBAC role assignment since the template currently only grants access to whoever's `deployer()` identity ran the deployment. Flagged to RAID `I-1` as the sharpest remaining candidate; **not implemented here** — this changes the account model steps 1 and 6/8 already assume, so it needs an explicit decision, not a silent template edit.
+   1. **Security Defaults — confirmed disabled 2026-08-28.** Microsoft's docs and multiple confirmed support cases describe this exact shape: *if Security Defaults are enabled, Global Administrators are always forced through MFA at VM sign-in, independent of per-user MFA or Conditional Access settings.* This step originally applied directly to `builder`, which held Global Administrator by design; `builder`'s Global Administrator role has since been removed (see account model in step 1 above and item 5 below), and Security Defaults itself has now been turned off tenant-wide (Entra admin center → Identity → Overview → Properties → Security Defaults → **No**) by the Entra-admin account, specifically so Conditional Access (items 2–4 below) could actually take effect — Security Defaults and Conditional Access can't run at once.
+   2. **Per-user MFA — confirmed disabled tenant-wide, 2026-08-28.** Entra admin center → Identity → Users → All users → **Per-user MFA** toolbar button → all users, including `builder`, show **Disabled**. This is required on Entra-joined session hosts regardless of Conditional Access — it isn't just a caveat, it actively breaks sign-in ("The sign-in method you're trying to use isn't allowed").
+   3. **Two-policy Conditional Access structure — built 2026-08-28.** Policy 1 (`MFA - Azure Virtual Desktop (feed-gateway)`) targets the **Azure Virtual Desktop** app (`9cdead84-a844-4324-93f2-b2e6bb768d07`); Policy 2 (`MFA - Windows Cloud Login (session-host SSO)`) targets the **Windows Cloud Login** app (`270efc09-cd0d-444b-a71f-39af4910ec45`). Both target the `grp-avd-demo-users` group (currently just `builder`), Client apps scoped to Browser + Mobile apps and desktop clients, Grant = Require MFA. Sign-in frequency: Policy 1 = Periodic reauthentication, 1 hour; Policy 2 = **Every time** (the strictest option, only supported on Windows Cloud Login — deliberately set higher than Policy 1, not just matching, per this engagement's enterprise-ready bar). Requires Entra ID P1/P2 — ties directly to Dependency DEP-1's licensing question. **Decided 2026-08-28 — closes `DEP-1`:** went with **Microsoft 365 E3, month-to-month** (not F3 — see the Office Apps note above under "What this deploys" for why), assigned to `builder` via a `grp-license-m365-e3` group, confirmed active.
+   4. **No stray "All cloud apps" policy — resolved 2026-08-28, but not a non-issue: one was found and fixed.** Disabling Security Defaults (item 1) triggered Microsoft to auto-create a **Microsoft-managed** Conditional Access policy, "Multifactor authentication for all users," scoped to All users / All cloud apps / Require MFA, with no sign-in frequency control set — a safety net so the tenant isn't left with zero MFA coverage, but exactly the kind of blanket policy this item warns about, since it also covered the Azure Virtual Desktop and Windows Cloud Login apps with no coordination with the two-policy structure in item 3. Microsoft-managed policies can't have their scope edited directly, so the fix was: **Duplicate** it into a custom policy ("Require multifactor authentication for all users - AVD Apps Excluded") that excludes both AVD apps from its cloud-apps scope, turn that duplicate **On**, then set the *original* Microsoft-managed policy's state to **Off** (its State field has its own Edit control, separate from full policy edit). End state: the duplicate covers the rest of the tenant, the two dedicated policies in item 3 have exclusive control over the AVD apps. General lesson for future Security-Defaults toggles in this tenant: check for a newly auto-created Microsoft-managed policy afterward, don't assume disabling Security Defaults leaves a clean slate.
+   5. **Resolved 2026-08-27 — RAID `I-1` closed.** This step originally posed an open decision between two options: (a) keep `builder` as a single do-everything Global Admin identity and structure Conditional Access/Security Defaults so a Global Admin can still sign in cleanly, or (b) split the identity — keep `builder` for one-time admin setup and introduce a second, ordinary account just for the demo login on stage (which would need its own RBAC role assignment, since the template's `deployer()` grant is tied to whoever actually deployed). **Neither — resolved a third way:** `builder` keeps a single identity for both deploy and demo login, but has had its Global Administrator role removed entirely; Entra-side configuration (Conditional Access, Security Defaults, per-user MFA) moved to a dedicated Entra-admin account that's never used for deploy or demo login (see the account model in step 1 above). This closes the original risk (Global-Admin-forced-MFA on `builder`) without the added complexity option (b) would have introduced. **Items 2–4 above are now also confirmed done (2026-08-28)** — the full pre-flight SSO/CA setup is complete pending an actual dry-run login to verify it behaves as expected end-to-end (see item 6 below and step 6 further down).
    6. Diagnose any remaining failure directly from the evidence, not guesswork: **Entra admin center → Identity → Monitoring & health → Sign-in logs**, filtered to `builder`, looking at both the **Azure Virtual Desktop** and **Windows Cloud Login** app entries for the failure window — the **Conditional Access** tab on each failed entry names the exact policy that blocked it.
 
    Source: [Troubleshoot single sign-on and Conditional Access for Azure Virtual Desktop](https://learn.microsoft.com/troubleshoot/azure/virtual-desktop/troubleshoot-sso-conditional-access), [Enforce Microsoft Entra multifactor authentication for Azure Virtual Desktop using Conditional Access](https://learn.microsoft.com/azure/virtual-desktop/set-up-mfa).
@@ -95,22 +98,35 @@ Files: `azuredeploy.json` (the template), `deploy-avd-demo.html` (the trigger pa
 
    ```bash
    # One-time per subscription — run from Cloud Shell (bash) or any shell with az CLI + login.
+   # Validated 2026-08-28 against a real subscription. Two of the commands below don't match the
+   # current `az automation` CLI extension (it's marked experimental) and need a direct ARM REST
+   # workaround instead — noted inline. `az automation runbook show` also doesn't reliably reflect
+   # draft content/state in this extension; don't use it to sanity-check the upload in step 4, trust
+   # the command's own exit code instead.
+
+   # 0. Install the automation extension if prompted (preview; required for every command below)
+   az extension add --name automation --yes
 
    # 1. Small resource group to hold the watcher (kept separate so it never gets deleted with a demo RG)
    az group create --name rg-freshdesktop-watcher --location northcentralus
 
-   # 2. Automation Account with a system-assigned managed identity
+   # 2. Automation Account, then a system-assigned managed identity via direct REST — `--assign-identity`
+   #    is not a real flag on `automation account create` (confirmed 2026-08-28), and there's no
+   #    dedicated identity-assignment command for Automation Accounts in this extension either.
+   SUB_ID=$(az account show --query id -o tsv)
    az automation account create \
-     --name aa-freshdesktop-watcher \
+     --automation-account-name aa-freshdesktop-watcher \
      --resource-group rg-freshdesktop-watcher \
      --location northcentralus \
-     --assign-identity
+     --sku Basic
+   az rest --method patch \
+     --url "https://management.azure.com/subscriptions/$SUB_ID/resourceGroups/rg-freshdesktop-watcher/providers/Microsoft.Automation/automationAccounts/aa-freshdesktop-watcher?api-version=2023-11-01" \
+     --body '{"identity": {"type": "SystemAssigned"}}'
+   PRINCIPAL_ID=$(az rest --method get --url "https://management.azure.com/subscriptions/$SUB_ID/resourceGroups/rg-freshdesktop-watcher/providers/Microsoft.Automation/automationAccounts/aa-freshdesktop-watcher?api-version=2023-11-01" --query identity.principalId -o tsv)
 
    # 3. One-time, durable grant — Contributor at subscription scope. Needed because the demo's
    #    resource group name/prefix varies per deploy, so the watcher can't be scoped narrower
    #    ahead of time (same style of grant as the Start VM on Connect RBAC in step 3a).
-   PRINCIPAL_ID=$(az automation account show --name aa-freshdesktop-watcher --resource-group rg-freshdesktop-watcher --query identity.principalId -o tsv)
-   SUB_ID=$(az account show --query id -o tsv)
    az role assignment create --assignee "$PRINCIPAL_ID" --role "Contributor" --scope "/subscriptions/$SUB_ID"
 
    # 4. Publish the watcher runbook (fetched from this repo, same raw-GitHub hosting pattern as
@@ -131,8 +147,11 @@ Files: `azuredeploy.json` (the template), `deploy-avd-demo.html` (the trigger pa
      --resource-group rg-freshdesktop-watcher \
      --name SelfDestructWatcher
 
-   # 5. Recurring hourly schedule, linked to the runbook — hourly is plenty of granularity given
-   #    the shortest self-destruct window (selfDestructHours) is 1 hour.
+   # 5. Recurring hourly schedule, then link it to the runbook via direct REST — `az automation
+   #    job-schedule create` does not exist in the current CLI extension (confirmed 2026-08-28; the
+   #    only subgroups are account/configuration/hrwg/job/python3-package/runbook/runtime-environment/
+   #    schedule/software-update-configuration/source-control — no job-schedule), so the JobSchedule
+   #    resource has to be created directly.
    az automation schedule create \
      --automation-account-name aa-freshdesktop-watcher \
      --resource-group rg-freshdesktop-watcher \
@@ -140,18 +159,18 @@ Files: `azuredeploy.json` (the template), `deploy-avd-demo.html` (the trigger pa
      --frequency Hour \
      --interval 1 \
      --start-time "$(date -u -d '+10 minutes' +%Y-%m-%dT%H:%M:%SZ)"
-   az automation job-schedule create \
-     --automation-account-name aa-freshdesktop-watcher \
-     --resource-group rg-freshdesktop-watcher \
-     --runbook-name SelfDestructWatcher \
-     --schedule-name hourly
+   JOB_SCHEDULE_ID=$(python3 -c "import uuid; print(uuid.uuid4())")
+   az rest --method put \
+     --url "https://management.azure.com/subscriptions/$SUB_ID/resourceGroups/rg-freshdesktop-watcher/providers/Microsoft.Automation/automationAccounts/aa-freshdesktop-watcher/jobSchedules/$JOB_SCHEDULE_ID?api-version=2015-10-31" \
+     --body '{"properties": {"schedule": {"name": "hourly"}, "runbook": {"name": "SelfDestructWatcher"}}}'
    ```
 
    Check it worked: Portal → the `aa-freshdesktop-watcher` Automation Account → **Jobs** — each hourly
    run's output lists every tagged resource group it found and whether it deleted or skipped it. That
    job history is also your confirmation trail that a given demo's resource group actually got torn
-   down, without needing anything more than what Azure already gives you for free. Not yet validated
-   against a real deploy — see RAID `D-8`.
+   down, without needing anything more than what Azure already gives you for free. **Validated
+   2026-08-28 — closes RAID `D-8`:** ran hourly against a real subscription for a full week with zero
+   failed jobs.
 
 4. **Template hosting is already handled — nothing to set up.** `azuredeploy.json` is hosted permanently at the public repo [`nickprignano/fresh-desktop-demo`](https://github.com/nickprignano/fresh-desktop-demo) and fetched directly by the Azure Portal at deploy time via its raw URL (default branch confirmed as `main` at build time — if you ever repoint or recreate the repo, re-verify the default branch before trusting the raw URL). The only time you touch GitHub again is if you edit `azuredeploy.json` locally and need to push that change to the repo before your next dry run or the live demo — the portal always fetches whatever's currently live there, not your local copy.
 
@@ -164,7 +183,7 @@ Files: `azuredeploy.json` (the template), `deploy-avd-demo.html` (the trigger pa
    - Leave `namePrefix` as `avddemo` or shorten if you want a distinct run
    - Review + create
 
-6a. **Repeat the full pass on the iPad, from a clean slate.** Fully tear down (`az group delete`) before redeploying for the iPad pass — a Personal host pool with Automatic assignment binds the VM to whichever identity connects first and stays bound, so a stale environment (or a teammate clicking the public repo's Deploy button in the meantime) can claim that assignment ahead of your intended test. While on the iPad, also confirm `builder`'s registered MFA method is actually completable from that device, not just the laptop — a Global Admin sign-in with an MFA method bound to a device that isn't physically on stage fails live with no recovery path.
+6a. **Repeat the full pass on the iPad, from a clean slate.** Fully tear down (`az group delete`) before redeploying for the iPad pass — a Personal host pool with Automatic assignment binds the VM to whichever identity connects first and stays bound, so a stale environment (or a teammate clicking the public repo's Deploy button in the meantime) can claim that assignment ahead of your intended test. While on the iPad, also confirm `builder`'s registered MFA method is actually completable from that device, not just the laptop — a sign-in with an MFA method bound to a device that isn't physically on stage fails live with no recovery path.
 
 7. **Time it.** Expect roughly:
    - ~2–3 min: networking + host pool/workspace/app group
